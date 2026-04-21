@@ -1,0 +1,181 @@
+import logging
+import re
+from typing import Annotated
+
+from fastapi import Depends, FastAPI, HTTPException
+from pydantic import BaseModel, Field
+
+from models.routing import RouteRequest, RouteResponse
+from services.routing_service import RoutingService
+from services.rule_based_router import RuleBasedRouter
+
+from models.extraction import ExtractRequest, ExtractResponse
+from services.exceptions import AppServiceError
+from services.extractor import get_extractor
+from services.extraction_service import ExtractionService
+
+from models.classification import ClassifyRequest, ClassifyResponse
+from services.classification_service import ClassificationService
+from services.rule_based_classifier import RuleBasedClassifier
+
+from models.summarization import SummarizeRequest, SummarizeResponse
+from services.rule_based_summarizer import RuleBasedSummarizer
+from services.summarization_service import SummarizationService
+
+from models.answering import AnswerRequest, AnswerResponse
+from services.answering_service import AnsweringService
+from services.rule_based_answerer import RuleBasedAnswerer
+
+logging.basicConfig(level=logging.INFO)
+
+app = FastAPI()
+
+
+class UserInput(BaseModel):
+    name: str = Field(min_length=1)
+    age: int = Field(ge=0, le=120)
+
+
+class TextRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=5000)
+
+
+class TextAnalysisResponse(BaseModel):
+    original_text: str
+    character_count: int
+    word_count: int
+    sentence_count: int
+    unique_words: int
+    preview: str
+
+def get_routing_service() -> RoutingService:
+    router = RuleBasedRouter()
+    return RoutingService(router)
+
+
+RoutingServiceDependency = Annotated[
+    RoutingService,
+    Depends(get_routing_service)
+]
+
+def get_extraction_service() -> ExtractionService:
+    extractor = get_extractor()
+    return ExtractionService(extractor)
+
+
+ExtractionServiceDependency = Annotated[
+    ExtractionService,
+    Depends(get_extraction_service)
+]
+
+def get_classification_service() -> ClassificationService:
+    classifier = RuleBasedClassifier()
+    return ClassificationService(classifier)
+
+
+ClassificationServiceDependency = Annotated[
+    ClassificationService,
+    Depends(get_classification_service)
+]
+
+def get_summarization_service() -> SummarizationService:
+    summarizer = RuleBasedSummarizer()
+    return SummarizationService(summarizer)
+
+
+SummarizationServiceDependency = Annotated[
+    SummarizationService,
+    Depends(get_summarization_service)
+]
+
+def get_answering_service() -> AnsweringService:
+    answerer = RuleBasedAnswerer()
+    return AnsweringService(answerer)
+
+
+AnsweringServiceDependency = Annotated[
+    AnsweringService,
+    Depends(get_answering_service)
+]
+
+@app.get("/health")
+def health() -> dict[str, str]:
+    return {"status": "ok"}
+
+
+@app.post("/greet")
+def greet(user: UserInput) -> dict[str, str]:
+    return {"message": f"Hello {user.name}, age {user.age}"}
+
+
+@app.post("/analyze", response_model=TextAnalysisResponse)
+def analyze_text(request: TextRequest) -> TextAnalysisResponse:
+    text = request.text.strip()
+
+    words = re.findall(r"\b\w+\b", text.lower())
+    sentences = [s for s in re.split(r"[.!?]+", text) if s.strip()]
+
+    return TextAnalysisResponse(
+        original_text=text,
+        character_count=len(text),
+        word_count=len(words),
+        sentence_count=len(sentences),
+        unique_words=len(set(words)),
+        preview=text[:80],
+    )
+
+@app.post("/route", response_model=RouteResponse)
+async def route_request(
+    request: RouteRequest,
+    routing_service: RoutingServiceDependency,
+) -> RouteResponse:
+    try:
+        return await routing_service.route(request.user_input)
+    except AppServiceError as ex:
+        raise HTTPException(status_code=500, detail=str(ex)) from ex
+    
+@app.post("/extract", response_model=ExtractResponse)
+async def extract_fields(
+    request: ExtractRequest,
+    extraction_service: ExtractionServiceDependency,
+) -> ExtractResponse:
+    try:
+        return await extraction_service.extract(request.text)
+    except AppServiceError as ex:
+        raise HTTPException(status_code=500, detail=str(ex)) from ex
+
+@app.post("/classify", response_model=ClassifyResponse)
+async def classify_text(
+    request: ClassifyRequest,
+    classification_service: ClassificationServiceDependency,
+) -> ClassifyResponse:
+    try:
+        return await classification_service.classify(request.text)
+    except AppServiceError as ex:
+        raise HTTPException(status_code=500, detail=str(ex)) from ex
+
+@app.post("/summarize", response_model=SummarizeResponse)
+async def summarize_text(
+    request: SummarizeRequest,
+    summarization_service: SummarizationServiceDependency,
+) -> SummarizeResponse:
+    try:
+        return await summarization_service.summarize(
+            request.text,
+            request.max_sentences,
+        )
+    except AppServiceError as ex:
+        raise HTTPException(status_code=500, detail=str(ex)) from ex
+
+@app.post("/answer", response_model=AnswerResponse)
+async def answer_question(
+    request: AnswerRequest,
+    answering_service: AnsweringServiceDependency,
+) -> AnswerResponse:
+    try:
+        return await answering_service.answer(
+            request.question,
+            request.context,
+        )
+    except AppServiceError as ex:
+        raise HTTPException(status_code=500, detail=str(ex)) from ex
