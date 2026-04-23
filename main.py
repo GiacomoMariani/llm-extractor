@@ -2,15 +2,16 @@ import logging
 import re
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
+
+from services.exceptions import AppServiceError, NotFoundError
 
 from models.routing import RouteRequest, RouteResponse
 from services.routing_service import RoutingService
 from services.rule_based_router import RuleBasedRouter
 
 from models.extraction import ExtractRequest, ExtractResponse
-from services.exceptions import AppServiceError
 from services.extractor import get_extractor
 from services.extraction_service import ExtractionService
 
@@ -25,6 +26,14 @@ from services.summarization_service import SummarizationService
 from models.answering import AnswerRequest, AnswerResponse
 from services.answering_service import AnsweringService
 from services.rule_based_answerer import RuleBasedAnswerer
+
+from models.document_qa import DocumentAskRequest, DocumentAskResponse, DocumentUploadResponse
+from services.document_ingestion_service import DocumentIngestionService
+from services.document_store import document_store
+
+from services.document_answering_service import DocumentAnsweringService
+from services.retrieval_service import RetrievalService
+from providers.embedding_provider import embedding_provider
 
 logging.basicConfig(level=logging.INFO)
 
@@ -98,6 +107,28 @@ AnsweringServiceDependency = Annotated[
     Depends(get_answering_service)
 ]
 
+def get_document_ingestion_service() -> DocumentIngestionService:
+    return DocumentIngestionService(
+        store=document_store,
+        embedding_provider=embedding_provider,
+    )
+
+DocumentIngestionServiceDependency = Annotated[
+    DocumentIngestionService,
+    Depends(get_document_ingestion_service),
+]
+
+def get_document_answering_service() -> DocumentAnsweringService:
+    return DocumentAnsweringService(
+        store=document_store,
+        retrieval_service=RetrievalService(embedding_provider),
+        answerer=RuleBasedAnswerer(),
+    )
+
+DocumentAnsweringServiceDependency = Annotated[
+    DocumentAnsweringService,
+    Depends(get_document_answering_service),
+]
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
@@ -178,4 +209,49 @@ async def answer_question(
             request.context,
         )
     except AppServiceError as ex:
+        raise HTTPException(status_code=500, detail=str(ex)) from ex
+
+@app.post("/documents/upload", response_model=DocumentUploadResponse)
+async def upload_document(
+    ingestion_service: DocumentIngestionServiceDependency,
+    file: UploadFile = File(...),
+) -> DocumentUploadResponse:
+    filename = file.filename or "uploaded.txt"
+
+    if not filename.lower().endswith(".txt"):
+        raise HTTPException(status_code=400, detail="Only .txt files are supported.")
+
+    raw_bytes = await file.read()
+
+    try:
+        text = raw_bytes.decode("utf-8")
+    except UnicodeDecodeError as ex:
+        raise HTTPException(
+            status_code=400,
+            detail="Document must be valid UTF-8 text.",
+        ) from ex
+
+    try:
+        return await ingestion_service.ingest_text(
+            filename=filename,
+            text=text,
+        )
+    except AppServiceError as ex:
+        raise HTTPException(status_code=400, detail=str(ex)) from ex
+
+@app.post("/documents/ask", response_model=DocumentAskResponse)
+async def ask_document_question(
+    request: DocumentAskRequest,
+    document_answering_service: DocumentAnsweringServiceDependency,
+) -> DocumentAskResponse:
+    try:
+        return await document_answering_service.answer(
+            document_id=request.document_id,
+            question=request.question,
+            top_k=request.top_k,
+        )
+    except AppServiceError as ex:
+        if str(ex) == "Document not found.":
+            raise HTTPException(status_code=404, detail=str(ex)) from ex
+
         raise HTTPException(status_code=500, detail=str(ex)) from ex
