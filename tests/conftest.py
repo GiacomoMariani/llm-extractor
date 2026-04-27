@@ -8,11 +8,17 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from services.document_store import document_store  # noqa: E402
+import main
+from services.sqlite_document_store import SQLiteDocumentStore
 
 
 @pytest.fixture(autouse=True)
-def clear_document_store():
-    document_store.clear()
+def use_test_sqlite_store(tmp_path, monkeypatch):
+    test_db_path = tmp_path / "test_app.db"
+    test_store = SQLiteDocumentStore(str(test_db_path))
+
+    monkeypatch.setattr(main, "sqlite_document_store", test_store)
+
     yield
-    document_store.clear()
+
+    test_store.clear()

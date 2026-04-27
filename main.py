@@ -29,11 +29,12 @@ from services.rule_based_answerer import RuleBasedAnswerer
 
 from models.document_qa import DocumentAskRequest, DocumentAskResponse, DocumentUploadResponse
 from services.document_ingestion_service import DocumentIngestionService
-from services.document_store import document_store
 
 from services.document_answering_service import DocumentAnsweringService
 from services.retrieval_service import RetrievalService
 from providers.embedding_provider import embedding_provider
+
+from services.sqlite_document_store import sqlite_document_store
 
 logging.basicConfig(level=logging.INFO)
 
@@ -109,7 +110,7 @@ AnsweringServiceDependency = Annotated[
 
 def get_document_ingestion_service() -> DocumentIngestionService:
     return DocumentIngestionService(
-        store=document_store,
+        store=sqlite_document_store,
         embedding_provider=embedding_provider,
     )
 
@@ -120,7 +121,7 @@ DocumentIngestionServiceDependency = Annotated[
 
 def get_document_answering_service() -> DocumentAnsweringService:
     return DocumentAnsweringService(
-        store=document_store,
+        store=sqlite_document_store,
         retrieval_service=RetrievalService(embedding_provider),
         answerer=RuleBasedAnswerer(),
     )
