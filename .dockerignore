@@ -8,3 +8,7 @@ app.db
 *.pyc
 *.pyo
 *.pyd
+
+.env
+.env.*
+!.env.example

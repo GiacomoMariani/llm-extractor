@@ -2,14 +2,17 @@ from fastapi.testclient import TestClient
 
 from main import app, get_answering_service
 from models.answering import AnswerResponse
+from services.answering_service import AnsweringService
 from services.exceptions import AppServiceError
 
 client = TestClient(app)
 
+AUTH_HEADERS = {"X-API-Key": "test-secret-key"}
+
 
 class FakeAnsweringService:
     async def answer(self, question: str, context: str) -> AnswerResponse:
-        return AnswerResponse(answer="Fake answer.")
+        return AnswerResponse(answer="Fake answer")
 
 
 class FailingAnsweringService:
@@ -17,12 +20,16 @@ class FailingAnsweringService:
         raise AppServiceError("Failed to answer question.")
 
 
-def fake_get_answering_service():
+def fake_get_answering_service() -> AnsweringService:
     return FakeAnsweringService()
 
 
-def failing_get_answering_service():
+def failing_get_answering_service() -> AnsweringService:
     return FailingAnsweringService()
+
+
+def teardown_function():
+    app.dependency_overrides.clear()
 
 
 def test_answer_route_uses_service_override():
@@ -30,6 +37,7 @@ def test_answer_route_uses_service_override():
 
     response = client.post(
         "/answer",
+        headers=AUTH_HEADERS,
         json={
             "question": "Anything?",
             "context": "Anything at all.",
@@ -38,10 +46,8 @@ def test_answer_route_uses_service_override():
 
     assert response.status_code == 200
     assert response.json() == {
-        "answer": "Fake answer."
+        "answer": "Fake answer",
     }
-
-    app.dependency_overrides.clear()
 
 
 def test_answer_route_returns_500_when_service_fails():
@@ -49,6 +55,7 @@ def test_answer_route_returns_500_when_service_fails():
 
     response = client.post(
         "/answer",
+        headers=AUTH_HEADERS,
         json={
             "question": "Anything?",
             "context": "Anything at all.",
@@ -59,5 +66,3 @@ def test_answer_route_returns_500_when_service_fails():
     assert response.json() == {
         "detail": "Failed to answer question."
     }
-
-    app.dependency_overrides.clear()

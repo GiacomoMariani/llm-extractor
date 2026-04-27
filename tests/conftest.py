@@ -22,3 +22,7 @@ def use_test_sqlite_store(tmp_path, monkeypatch):
     yield
 
     test_store.clear()
+
+@pytest.fixture(autouse=True)
+def set_test_api_key(monkeypatch):
+    monkeypatch.setenv("APP_API_KEY", "test-secret-key")

@@ -1,11 +1,14 @@
 import logging
 import re
 from typing import Annotated
+import time
+from uuid import uuid4
 
 from auth import require_api_key
-from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, UploadFile, Request
 from pydantic import BaseModel, Field
 
+from models.health import HealthResponse
 from services.exceptions import AppServiceError, NotFoundError
 
 from models.routing import RouteRequest, RouteResponse
@@ -37,10 +40,44 @@ from providers.embedding_provider import embedding_provider
 
 from services.sqlite_document_store import sqlite_document_store
 
+logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
-
 app = FastAPI()
 
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    request_id = request.headers.get("X-Request-ID", uuid4().hex[:12])
+    start_time = time.perf_counter()
+
+    try:
+        response = await call_next(request)
+    except Exception:
+        duration_ms = (time.perf_counter() - start_time) * 1000
+
+        logger.exception(
+            "Request failed method=%s path=%s duration_ms=%.2f request_id=%s",
+            request.method,
+            request.url.path,
+            duration_ms,
+            request_id,
+        )
+
+        raise
+
+    duration_ms = (time.perf_counter() - start_time) * 1000
+
+    response.headers["X-Request-ID"] = request_id
+
+    logger.info(
+        "Request completed method=%s path=%s status_code=%s duration_ms=%.2f request_id=%s",
+        request.method,
+        request.url.path,
+        response.status_code,
+        duration_ms,
+        request_id,
+    )
+
+    return response
 
 class UserInput(BaseModel):
     name: str = Field(min_length=1)
@@ -131,9 +168,10 @@ DocumentAnsweringServiceDependency = Annotated[
     DocumentAnsweringService,
     Depends(get_document_answering_service),
 ]
-@app.get("/health")
-def health() -> dict[str, str]:
-    return {"status": "ok"}
+
+@app.get("/health", response_model=HealthResponse)
+async def health_check() -> HealthResponse:
+    return HealthResponse(status="ok")
 
 
 @app.post("/greet")
