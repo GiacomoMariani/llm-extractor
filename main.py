@@ -2,6 +2,7 @@ import logging
 import re
 from typing import Annotated
 
+from auth import require_api_key
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
@@ -166,7 +167,11 @@ async def route_request(
     except AppServiceError as ex:
         raise HTTPException(status_code=500, detail=str(ex)) from ex
     
-@app.post("/extract", response_model=ExtractResponse)
+@app.post(
+    "/extract",
+    response_model=ExtractResponse,
+    dependencies=[Depends(require_api_key)],
+)
 async def extract_fields(
     request: ExtractRequest,
     extraction_service: ExtractionServiceDependency,
@@ -199,7 +204,11 @@ async def summarize_text(
     except AppServiceError as ex:
         raise HTTPException(status_code=500, detail=str(ex)) from ex
 
-@app.post("/answer", response_model=AnswerResponse)
+@app.post(
+    "/answer",
+    response_model=AnswerResponse,
+    dependencies=[Depends(require_api_key)],
+)
 async def answer_question(
     request: AnswerRequest,
     answering_service: AnsweringServiceDependency,
@@ -212,7 +221,12 @@ async def answer_question(
     except AppServiceError as ex:
         raise HTTPException(status_code=500, detail=str(ex)) from ex
 
-@app.post("/documents/upload", response_model=DocumentUploadResponse)
+
+@app.post(
+    "/documents/upload",
+    response_model=DocumentUploadResponse,
+    dependencies=[Depends(require_api_key)],
+)
 async def upload_document(
     ingestion_service: DocumentIngestionServiceDependency,
     file: UploadFile = File(...),
@@ -240,7 +254,11 @@ async def upload_document(
     except AppServiceError as ex:
         raise HTTPException(status_code=400, detail=str(ex)) from ex
 
-@app.post("/documents/ask", response_model=DocumentAskResponse)
+@app.post(
+    "/documents/ask",
+    response_model=DocumentAskResponse,
+    dependencies=[Depends(require_api_key)],
+)
 async def ask_document_question(
     request: DocumentAskRequest,
     document_answering_service: DocumentAnsweringServiceDependency,
