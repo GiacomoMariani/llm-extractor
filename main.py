@@ -40,6 +40,9 @@ from providers.embedding_provider import embedding_provider
 
 from services.sqlite_document_store import sqlite_document_store
 
+from models.tool_assistant import ToolAssistantRequest, ToolAssistantResponse
+from services.tool_assistant_service import ToolAssistantService
+
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 app = FastAPI()
@@ -145,6 +148,9 @@ AnsweringServiceDependency = Annotated[
     AnsweringService,
     Depends(get_answering_service)
 ]
+
+def get_tool_assistant_service() -> ToolAssistantService:
+    return ToolAssistantService()
 
 def get_document_ingestion_service() -> DocumentIngestionService:
     return DocumentIngestionService(
@@ -312,3 +318,15 @@ async def ask_document_question(
             raise HTTPException(status_code=404, detail=str(ex)) from ex
 
         raise HTTPException(status_code=500, detail=str(ex)) from ex
+
+@app.post(
+    "/tool-assistant",
+    response_model=ToolAssistantResponse,
+    dependencies=[Depends(require_api_key)],
+)
+async def tool_assistant(
+    request: ToolAssistantRequest,
+    service: ToolAssistantService = Depends(get_tool_assistant_service),
+) -> ToolAssistantResponse:
+    result = await service.answer(request.message)
+    return ToolAssistantResponse(**result)

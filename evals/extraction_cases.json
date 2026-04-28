@@ -1,0 +1,32 @@
+[
+  {
+    "name": "refund request with order id and email",
+    "input": "Hi, my email is ada@example.com. My order ID is ORD-123. This is urgent because I want a refund.",
+    "expected": {
+      "email": "ada@example.com",
+      "order_id": "ORD-123",
+      "urgency": "high",
+      "has_refund_request": true
+    }
+  },
+  {
+    "name": "normal support request without refund",
+    "input": "Hello, you can reach me at grace@example.com. My order ID is ORD-456. I just want to know when it will arrive.",
+    "expected": {
+      "email": "grace@example.com",
+      "order_id": "ORD-456",
+      "urgency": "low",
+      "has_refund_request": false
+    }
+  },
+  {
+    "name": "urgent issue without refund",
+    "input": "Please help urgently. Contact me at alan@example.com. My order ID is ORD-789. The package arrived damaged.",
+    "expected": {
+      "email": "alan@example.com",
+      "order_id": "ORD-789",
+      "urgency": "high",
+      "has_refund_request": false
+    }
+  }
+]
