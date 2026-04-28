@@ -148,12 +148,26 @@ class HttpOrderClient:
         if self.retry_delay_seconds > 0:
             time.sleep(self.retry_delay_seconds)
 
-    
+class FallbackOrderClient:
+    def __init__(
+        self,
+        primary_client: Any,
+        fallback_client: Any,
+    ):
+        self.primary_client = primary_client
+        self.fallback_client = fallback_client
+
+    def get_order(self, order_id: str) -> dict[str, Any] | None:
+        try:
+            return self.primary_client.get_order(order_id)
+        except OrderClientError:
+            return self.fallback_client.get_order(order_id)
+
 def create_order_client(
     client_type: str = "local",
     base_url: str | None = None,
     api_key: str | None = None,
-) -> LocalOrderClient | HttpOrderClient:
+) -> LocalOrderClient | HttpOrderClient | FallbackOrderClient:
     normalized_client_type = client_type.lower()
 
     if normalized_client_type == "local":
@@ -168,6 +182,20 @@ def create_order_client(
         return HttpOrderClient(
             base_url=base_url,
             api_key=api_key,
+        )
+
+    if normalized_client_type == "http_with_fallback":
+        if not base_url:
+            raise OrderClientError(
+                "ORDER_API_BASE_URL is required when ORDER_CLIENT_TYPE=http_with_fallback."
+            )
+
+        return FallbackOrderClient(
+            primary_client=HttpOrderClient(
+                base_url=base_url,
+                api_key=api_key,
+            ),
+            fallback_client=LocalOrderClient(),
         )
 
     raise OrderClientError(
