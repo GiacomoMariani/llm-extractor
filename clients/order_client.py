@@ -55,18 +55,20 @@ class HttpOrderClient:
     RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 
     def __init__(
-        self,
-        base_url: str,
-        api_key: str | None = None,
-        timeout_seconds: float = 5.0,
-        max_retries: int = 2,
-        retry_delay_seconds: float = 0.25,
-    ):
+            self,
+            base_url: str,
+            api_key: str | None = None,
+            timeout_seconds: float = 5.0,
+            max_retries: int = 2,
+            retry_delay_seconds: float = 0.25,
+            max_retry_delay_seconds: float = 5.0,
+    ) -> None:
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.timeout_seconds = timeout_seconds
         self.max_retries = max_retries
         self.retry_delay_seconds = retry_delay_seconds
+        self.max_retry_delay_seconds = max_retry_delay_seconds
 
     def get_order(self, order_id: str) -> dict[str, Any] | None:
         normalized_order_id = order_id.upper()
@@ -103,7 +105,8 @@ class HttpOrderClient:
                     return None
 
                 if self._should_retry_http_error(ex, attempt_number, total_attempts):
-                    self._wait_before_retry()
+                    retry_delay_seconds = self._get_retry_delay_seconds(ex)
+                    self._wait_before_retry(retry_delay_seconds)
                     continue
 
                 raise OrderClientError(
@@ -112,7 +115,7 @@ class HttpOrderClient:
 
             except urllib.error.URLError as ex:
                 if self._should_retry_url_error(attempt_number, total_attempts):
-                    self._wait_before_retry()
+                    self._wait_before_retry(self.retry_delay_seconds)
                     continue
 
                 raise OrderClientError(
@@ -144,9 +147,36 @@ class HttpOrderClient:
     ) -> bool:
         return attempt_number < total_attempts
 
-    def _wait_before_retry(self) -> None:
-        if self.retry_delay_seconds > 0:
-            time.sleep(self.retry_delay_seconds)
+    def _get_retry_delay_seconds(
+            self,
+            error: urllib.error.HTTPError,
+    ) -> float:
+        if error.code != 429:
+            return self.retry_delay_seconds
+
+        retry_after = None
+
+        if error.headers is not None:
+            retry_after = error.headers.get("Retry-After")
+
+        if retry_after is None:
+            return self.retry_delay_seconds
+
+        try:
+            retry_after_seconds = float(retry_after)
+        except ValueError:
+            return self.retry_delay_seconds
+
+        if retry_after_seconds < 0:
+            return self.retry_delay_seconds
+
+        return min(retry_after_seconds, self.max_retry_delay_seconds)
+
+        return min(retry_after_seconds, self.max_retry_delay_seconds)
+
+    def _wait_before_retry(self, delay_seconds: float) -> None:
+        if delay_seconds > 0:
+            time.sleep(delay_seconds)
 
 class FallbackOrderClient:
     def __init__(

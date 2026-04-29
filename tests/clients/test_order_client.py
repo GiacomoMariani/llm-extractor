@@ -158,6 +158,216 @@ def test_http_order_client_retries_retryable_http_error_then_succeeds(monkeypatc
     assert order["estimated_delivery"] == "2026-05-02"
     assert len(calls) == 2
 
+def test_http_order_client_uses_retry_after_header_for_429(monkeypatch):
+    calls = []
+    sleep_delays = []
+
+    def fake_sleep(delay):
+        sleep_delays.append(delay)
+
+    def fake_urlopen(request, timeout):
+        calls.append(request)
+
+        if len(calls) == 1:
+            raise urllib.error.HTTPError(
+                url=request.full_url,
+                code=429,
+                msg="Too Many Requests",
+                hdrs={"Retry-After": "2"},
+                fp=None,
+            )
+
+        return FakeHttpResponse(
+            """
+            {
+                "status": "shipped",
+                "estimated_delivery": "2026-05-02",
+                "refund_eligible": true,
+                "refund_reason": "The order has not been delivered yet."
+            }
+            """
+        )
+
+    monkeypatch.setattr(
+        "clients.order_client.urllib.request.urlopen",
+        fake_urlopen,
+    )
+    monkeypatch.setattr(
+        "clients.order_client.time.sleep",
+        fake_sleep,
+    )
+
+    client = HttpOrderClient(
+        base_url="https://orders.example.com",
+        max_retries=1,
+        retry_delay_seconds=0,
+    )
+
+    order = client.get_order("ORD-123")
+
+    assert order is not None
+    assert order["status"] == "shipped"
+    assert len(calls) == 2
+    assert sleep_delays == [2.0]
+
+def test_http_order_client_caps_retry_after_delay_for_429(monkeypatch):
+    calls = []
+    sleep_delays = []
+
+    def fake_sleep(delay):
+        sleep_delays.append(delay)
+
+    def fake_urlopen(request, timeout):
+        calls.append(request)
+
+        if len(calls) == 1:
+            raise urllib.error.HTTPError(
+                url=request.full_url,
+                code=429,
+                msg="Too Many Requests",
+                hdrs={"Retry-After": "999"},
+                fp=None,
+            )
+
+        return FakeHttpResponse(
+            """
+            {
+                "status": "shipped",
+                "estimated_delivery": "2026-05-02",
+                "refund_eligible": true,
+                "refund_reason": "The order has not been delivered yet."
+            }
+            """
+        )
+
+    monkeypatch.setattr(
+        "clients.order_client.urllib.request.urlopen",
+        fake_urlopen,
+    )
+    monkeypatch.setattr(
+        "clients.order_client.time.sleep",
+        fake_sleep,
+    )
+
+    client = HttpOrderClient(
+        base_url="https://orders.example.com",
+        max_retries=1,
+        retry_delay_seconds=0,
+        max_retry_delay_seconds=5,
+    )
+
+    order = client.get_order("ORD-123")
+
+    assert order is not None
+    assert order["status"] == "shipped"
+    assert len(calls) == 2
+    assert sleep_delays == [5.0]
+
+def test_http_order_client_falls_back_when_retry_after_is_invalid(monkeypatch):
+    calls = []
+    sleep_delays = []
+
+    def fake_sleep(delay):
+        sleep_delays.append(delay)
+
+    def fake_urlopen(request, timeout):
+        calls.append(request)
+
+        if len(calls) == 1:
+            raise urllib.error.HTTPError(
+                url=request.full_url,
+                code=429,
+                msg="Too Many Requests",
+                hdrs={"Retry-After": "not-a-number"},
+                fp=None,
+            )
+
+        return FakeHttpResponse(
+            """
+            {
+                "status": "shipped",
+                "estimated_delivery": "2026-05-02",
+                "refund_eligible": true,
+                "refund_reason": "The order has not been delivered yet."
+            }
+            """
+        )
+
+    monkeypatch.setattr(
+        "clients.order_client.urllib.request.urlopen",
+        fake_urlopen,
+    )
+    monkeypatch.setattr(
+        "clients.order_client.time.sleep",
+        fake_sleep,
+    )
+
+    client = HttpOrderClient(
+        base_url="https://orders.example.com",
+        max_retries=1,
+        retry_delay_seconds=0.5,
+        max_retry_delay_seconds=5,
+    )
+
+    order = client.get_order("ORD-123")
+
+    assert order is not None
+    assert order["status"] == "shipped"
+    assert len(calls) == 2
+    assert sleep_delays == [0.5]
+
+def test_http_order_client_falls_back_when_retry_after_is_negative(monkeypatch):
+    calls = []
+    sleep_delays = []
+
+    def fake_sleep(delay):
+        sleep_delays.append(delay)
+
+    def fake_urlopen(request, timeout):
+        calls.append(request)
+
+        if len(calls) == 1:
+            raise urllib.error.HTTPError(
+                url=request.full_url,
+                code=429,
+                msg="Too Many Requests",
+                hdrs={"Retry-After": "-10"},
+                fp=None,
+            )
+
+        return FakeHttpResponse(
+            """
+            {
+                "status": "shipped",
+                "estimated_delivery": "2026-05-02",
+                "refund_eligible": true,
+                "refund_reason": "The order has not been delivered yet."
+            }
+            """
+        )
+
+    monkeypatch.setattr(
+        "clients.order_client.urllib.request.urlopen",
+        fake_urlopen,
+    )
+    monkeypatch.setattr(
+        "clients.order_client.time.sleep",
+        fake_sleep,
+    )
+
+    client = HttpOrderClient(
+        base_url="https://orders.example.com",
+        max_retries=1,
+        retry_delay_seconds=0.5,
+        max_retry_delay_seconds=5,
+    )
+
+    order = client.get_order("ORD-123")
+
+    assert order is not None
+    assert order["status"] == "shipped"
+    assert len(calls) == 2
+    assert sleep_delays == [0.5]
 
 def test_http_order_client_returns_none_for_404_without_retrying(monkeypatch):
     calls = []

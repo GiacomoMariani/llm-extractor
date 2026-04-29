@@ -38,6 +38,10 @@ from services.document_answering_service import DocumentAnsweringService
 from services.retrieval_service import RetrievalService
 from providers.embedding_provider import embedding_provider
 
+from models.chat import ChatRequest, ChatResponse
+from services.chat_service import ChatService
+from services.rule_based_chatbot import RuleBasedChatbot
+
 from services.sqlite_document_store import sqlite_document_store
 
 from models.tool_assistant import ToolAssistantRequest, ToolAssistantResponse
@@ -173,6 +177,16 @@ def get_document_answering_service() -> DocumentAnsweringService:
 DocumentAnsweringServiceDependency = Annotated[
     DocumentAnsweringService,
     Depends(get_document_answering_service),
+]
+
+def get_chat_service() -> ChatService:
+    chatbot = RuleBasedChatbot()
+    return ChatService(chatbot)
+
+
+ChatServiceDependency = Annotated[
+    ChatService,
+    Depends(get_chat_service),
 ]
 
 @app.get("/health", response_model=HealthResponse)
@@ -330,3 +344,17 @@ async def tool_assistant(
 ) -> ToolAssistantResponse:
     result = await service.answer(request.message)
     return ToolAssistantResponse(**result)
+
+@app.post(
+    "/chat",
+    response_model=ChatResponse,
+    dependencies=[Depends(require_api_key)],
+)
+async def chat(
+    request: ChatRequest,
+    chat_service: ChatServiceDependency,
+) -> ChatResponse:
+    try:
+        return await chat_service.chat(request.message)
+    except AppServiceError as ex:
+        raise HTTPException(status_code=500, detail=str(ex)) from ex
