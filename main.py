@@ -5,7 +5,7 @@ import time
 from uuid import uuid4
 
 from auth import require_api_key
-from fastapi import Depends, FastAPI, File, HTTPException, UploadFile, Request
+from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, Request, UploadFile
 from pydantic import BaseModel, Field
 
 from models.health import HealthResponse
@@ -31,8 +31,12 @@ from models.answering import AnswerRequest, AnswerResponse
 from services.answering_service import AnsweringService
 from services.rule_based_answerer import RuleBasedAnswerer
 
-from models.document_qa import DocumentAskRequest, DocumentAskResponse, DocumentUploadResponse
-from services.document_ingestion_service import DocumentIngestionService
+from models.document_qa import (
+    DocumentAskRequest,
+    DocumentAskResponse,
+    DocumentIngestionJobResponse,
+    DocumentUploadResponse,
+)
 
 from services.document_answering_service import DocumentAnsweringService
 from services.retrieval_service import RetrievalService
@@ -44,8 +48,22 @@ from services.rule_based_chatbot import RuleBasedChatbot
 
 from services.sqlite_document_store import sqlite_document_store
 
+from services.document_ingestion_service import DocumentIngestionService
+from services.ingestion_job_store import SQLiteIngestionJobStore, sqlite_ingestion_job_store
+from services.document_ingestion_worker import DocumentIngestionWorker
+
 from models.tool_assistant import ToolAssistantRequest, ToolAssistantResponse
 from services.tool_assistant_service import ToolAssistantService
+
+from models.evaluation import (
+    DocumentQAEvalLatestRunResponse,
+    DocumentQAEvalStoredCaseResultResponse,
+)
+
+from services.evaluation_result_store import (
+    SQLiteEvaluationResultStore,
+    sqlite_evaluation_result_store,
+)
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -167,6 +185,38 @@ DocumentIngestionServiceDependency = Annotated[
     Depends(get_document_ingestion_service),
 ]
 
+def get_ingestion_job_store() -> SQLiteIngestionJobStore:
+    return sqlite_ingestion_job_store
+
+IngestionJobStoreDependency = Annotated[
+    SQLiteIngestionJobStore,
+    Depends(get_ingestion_job_store),
+]
+
+def get_evaluation_result_store() -> SQLiteEvaluationResultStore:
+    return sqlite_evaluation_result_store
+
+
+EvaluationResultStoreDependency = Annotated[
+    SQLiteEvaluationResultStore,
+    Depends(get_evaluation_result_store),
+]
+
+def get_document_ingestion_worker(
+    ingestion_service: DocumentIngestionServiceDependency,
+    job_store: IngestionJobStoreDependency,
+) -> DocumentIngestionWorker:
+    return DocumentIngestionWorker(
+        ingestion_service=ingestion_service,
+        job_store=job_store,
+    )
+
+
+DocumentIngestionWorkerDependency = Annotated[
+    DocumentIngestionWorker,
+    Depends(get_document_ingestion_worker),
+]
+
 def get_document_answering_service() -> DocumentAnsweringService:
     return DocumentAnsweringService(
         store=sqlite_document_store,
@@ -188,6 +238,7 @@ ChatServiceDependency = Annotated[
     ChatService,
     Depends(get_chat_service),
 ]
+
 
 @app.get("/health", response_model=HealthResponse)
 async def health_check() -> HealthResponse:
@@ -282,13 +333,14 @@ async def answer_question(
 
 @app.post(
     "/documents/upload",
-    response_model=DocumentUploadResponse,
+    response_model=DocumentIngestionJobResponse,
     dependencies=[Depends(require_api_key)],
 )
 async def upload_document(
-    ingestion_service: DocumentIngestionServiceDependency,
+    background_tasks: BackgroundTasks,
+    ingestion_worker: DocumentIngestionWorkerDependency,
     file: UploadFile = File(...),
-) -> DocumentUploadResponse:
+) -> DocumentIngestionJobResponse:
     filename = file.filename or "uploaded.txt"
 
     if not filename.lower().endswith(".txt"):
@@ -304,13 +356,54 @@ async def upload_document(
             detail="Document must be valid UTF-8 text.",
         ) from ex
 
-    try:
-        return await ingestion_service.ingest_text(
-            filename=filename,
-            text=text,
-        )
-    except AppServiceError as ex:
-        raise HTTPException(status_code=400, detail=str(ex)) from ex
+    if not text.strip():
+        raise HTTPException(status_code=400, detail="Uploaded document is empty.")
+
+    queued_job = ingestion_worker.create_text_upload_job(filename)
+
+    background_tasks.add_task(
+        ingestion_worker.process_existing_text_upload_job_safely,
+        queued_job.job_id,
+        filename,
+        text,
+    )
+
+    return DocumentIngestionJobResponse(
+        job_id=queued_job.job_id,
+        filename=queued_job.filename,
+        status=queued_job.status,
+        document_id=queued_job.document_id,
+        chunk_count=queued_job.chunk_count,
+        error_message=queued_job.error_message,
+        created_at=queued_job.created_at,
+        updated_at=queued_job.updated_at,
+    )
+
+@app.get(
+    "/documents/jobs/{job_id}",
+    response_model=DocumentIngestionJobResponse,
+    dependencies=[Depends(require_api_key)],
+)
+async def get_document_ingestion_job(
+    job_id: str,
+    job_store: IngestionJobStoreDependency,
+) -> DocumentIngestionJobResponse:
+    job = job_store.get_job(job_id)
+
+    if job is None:
+        raise HTTPException(status_code=404, detail="Ingestion job not found.")
+
+    return DocumentIngestionJobResponse(
+        job_id=job.job_id,
+        filename=job.filename,
+        status=job.status,
+        document_id=job.document_id,
+        chunk_count=job.chunk_count,
+        error_message=job.error_message,
+        created_at=job.created_at,
+        updated_at=job.updated_at,
+    )
+
 
 @app.post(
     "/documents/ask",
@@ -332,7 +425,6 @@ async def ask_document_question(
             raise HTTPException(status_code=404, detail=str(ex)) from ex
 
         raise HTTPException(status_code=500, detail=str(ex)) from ex
-
 @app.post(
     "/tool-assistant",
     response_model=ToolAssistantResponse,
@@ -358,3 +450,43 @@ async def chat(
         return await chat_service.chat(request.message)
     except AppServiceError as ex:
         raise HTTPException(status_code=500, detail=str(ex)) from ex
+
+@app.get(
+    "/evals/document-qa/latest",
+    response_model=DocumentQAEvalLatestRunResponse,
+    dependencies=[Depends(require_api_key)],
+)
+async def get_latest_document_qa_eval(
+    evaluation_result_store: EvaluationResultStoreDependency,
+) -> DocumentQAEvalLatestRunResponse:
+    latest_run = evaluation_result_store.get_latest_run()
+
+    if latest_run is None:
+        raise HTTPException(
+            status_code=404,
+            detail="No document QA evaluation runs found.",
+        )
+
+    case_results = evaluation_result_store.get_case_results(latest_run.run_id)
+
+    return DocumentQAEvalLatestRunResponse(
+        run_id=latest_run.run_id,
+        total_cases=latest_run.total_cases,
+        passed=latest_run.passed,
+        failed=latest_run.failed,
+        average_latency_ms=latest_run.average_latency_ms,
+        created_at=latest_run.created_at,
+        results=[
+            DocumentQAEvalStoredCaseResultResponse(
+                name=result.name,
+                passed=result.passed,
+                answer=result.answer,
+                citation_count=result.citation_count,
+                checks=result.checks,
+                failures=result.failures,
+                latency_ms=result.latency_ms,
+                document_id=result.document_id,
+            )
+            for result in case_results
+        ],
+    )

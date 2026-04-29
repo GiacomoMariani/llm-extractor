@@ -51,22 +51,25 @@ def check_refund_eligibility(order_id: str) -> dict[str, Any]:
         "reason": order["refund_reason"],
     }
 
+
 REFUND_REQUESTS: list[dict[str, object]] = []
 
+
 def create_refund_request(order_id: str) -> dict[str, object]:
     eligibility = check_refund_eligibility(order_id)
+    normalized_order_id = str(eligibility["order_id"])
 
     if not eligibility["found"]:
         return {
             "created": False,
-            "order_id": order_id,
+            "order_id": normalized_order_id,
             "message": "Refund request could not be created because the order was not found.",
         }
 
     if not eligibility["eligible"]:
         return {
             "created": False,
-            "order_id": order_id,
+            "order_id": normalized_order_id,
             "message": f"Refund request could not be created. Reason: {eligibility['reason']}",
         }
 
@@ -74,7 +77,7 @@ def create_refund_request(order_id: str) -> dict[str, object]:
 
     refund_request = {
         "refund_request_id": refund_request_id,
-        "order_id": order_id,
+        "order_id": normalized_order_id,
         "status": "submitted",
     }
 
@@ -83,133 +86,30 @@ def create_refund_request(order_id: str) -> dict[str, object]:
     return {
         "created": True,
         "refund_request_id": refund_request_id,
-        "order_id": order_id,
+        "order_id": normalized_order_id,
         "status": "submitted",
         "message": "Refund request submitted successfully.",
     }
 
-def create_refund_request(order_id: str) -> dict[str, object]:
-    eligibility = check_refund_eligibility(order_id)
-
-    if not eligibility["found"]:
-        return {
-            "created": False,
-            "order_id": order_id,
-            "message": "Refund request could not be created because the order was not found.",
-        }
-
-    if not eligibility["eligible"]:
-        return {
-            "created": False,
-            "order_id": order_id,
-            "message": f"Refund request could not be created. Reason: {eligibility['reason']}",
-        }
-
-    refund_request_id = f"REF-{len(REFUND_REQUESTS) + 1:03d}"
-
-    refund_request = {
-        "refund_request_id": refund_request_id,
-        "order_id": order_id,
-        "status": "submitted",
-    }
-
-    REFUND_REQUESTS.append(refund_request)
-
-    return {
-        "created": True,
-        "refund_request_id": refund_request_id,
-        "order_id": order_id,
-        "status": "submitted",
-        "message": "Refund request submitted successfully.",
-    }
-
-def create_refund_request(order_id: str) -> dict[str, object]:
-    eligibility = check_refund_eligibility(order_id)
-
-    if not eligibility["found"]:
-        return {
-            "created": False,
-            "order_id": order_id,
-            "message": "Refund request could not be created because the order was not found.",
-        }
-
-    if not eligibility["eligible"]:
-        return {
-            "created": False,
-            "order_id": order_id,
-            "message": f"Refund request could not be created. Reason: {eligibility['reason']}",
-        }
-
-    refund_request_id = f"REF-{len(REFUND_REQUESTS) + 1:03d}"
-
-    refund_request = {
-        "refund_request_id": refund_request_id,
-        "order_id": order_id,
-        "status": "submitted",
-    }
-
-    REFUND_REQUESTS.append(refund_request)
-
-    return {
-        "created": True,
-        "refund_request_id": refund_request_id,
-        "order_id": order_id,
-        "status": "submitted",
-        "message": "Refund request submitted successfully.",
-    }
-
-def create_refund_request(order_id: str) -> dict[str, object]:
-    eligibility = check_refund_eligibility(order_id)
-
-    if not eligibility["found"]:
-        return {
-            "created": False,
-            "order_id": order_id,
-            "message": "Refund request could not be created because the order was not found.",
-        }
-
-    if not eligibility["eligible"]:
-        return {
-            "created": False,
-            "order_id": order_id,
-            "message": f"Refund request could not be created. Reason: {eligibility['reason']}",
-        }
-
-    refund_request_id = f"REF-{len(REFUND_REQUESTS) + 1:03d}"
-
-    refund_request = {
-        "refund_request_id": refund_request_id,
-        "order_id": order_id,
-        "status": "submitted",
-    }
-
-    REFUND_REQUESTS.append(refund_request)
-
-    return {
-        "created": True,
-        "refund_request_id": refund_request_id,
-        "order_id": order_id,
-        "status": "submitted",
-        "message": "Refund request submitted successfully.",
-    }
 
 PENDING_REFUND_REQUESTS: dict[str, dict[str, object]] = {}
 
 
 def create_pending_refund_request(order_id: str) -> dict[str, object]:
     eligibility = check_refund_eligibility(order_id)
+    normalized_order_id = str(eligibility["order_id"])
 
     if not eligibility["found"]:
         return {
             "created": False,
-            "order_id": order_id,
+            "order_id": normalized_order_id,
             "message": "Pending refund request could not be created because the order was not found.",
         }
 
     if not eligibility["eligible"]:
         return {
             "created": False,
-            "order_id": order_id,
+            "order_id": normalized_order_id,
             "message": f"Pending refund request could not be created. Reason: {eligibility['reason']}",
         }
 
@@ -217,7 +117,7 @@ def create_pending_refund_request(order_id: str) -> dict[str, object]:
 
     pending_action = {
         "pending_action_id": pending_action_id,
-        "order_id": order_id,
+        "order_id": normalized_order_id,
         "action": "create_refund_request",
         "status": "pending_confirmation",
     }
@@ -227,7 +127,7 @@ def create_pending_refund_request(order_id: str) -> dict[str, object]:
     return {
         "created": True,
         "pending_action_id": pending_action_id,
-        "order_id": order_id,
+        "order_id": normalized_order_id,
         "action": "create_refund_request",
         "status": "pending_confirmation",
         "message": "Refund request is pending confirmation.",

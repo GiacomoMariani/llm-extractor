@@ -1,0 +1,32 @@
+[
+  {
+    "name": "backend_framework_question",
+    "document_filename": "backend_guide.txt",
+    "document_text": "FastAPI is the backend framework used in this project. Pytest is used for automated testing. Docker packages the application for deployment.",
+    "question": "What backend framework is used?",
+    "expected_answer_contains": ["FastAPI"],
+    "expected_citation_contains": ["FastAPI"],
+    "min_citations": 1,
+    "require_retrieval_scores": true
+  },
+  {
+    "name": "background_jobs_question",
+    "document_filename": "production_rag_guide.txt",
+    "document_text": "Background ingestion jobs let uploads return quickly. The job status endpoint tells clients whether ingestion is queued, processing, completed, or failed.",
+    "question": "What lets uploads return quickly?",
+    "expected_answer_contains": ["Background ingestion jobs"],
+    "expected_citation_contains": ["Background ingestion jobs"],
+    "min_citations": 1,
+    "require_retrieval_scores": true
+  },
+  {
+    "name": "hybrid_retrieval_question",
+    "document_filename": "retrieval_guide.txt",
+    "document_text": "Hybrid retrieval combines vector similarity with keyword search. Citations show vector, keyword, and hybrid scores for debugging.",
+    "question": "What does hybrid retrieval combine?",
+    "expected_answer_contains": ["vector similarity", "keyword search"],
+    "expected_citation_contains": ["Hybrid retrieval"],
+    "min_citations": 1,
+    "require_retrieval_scores": true
+  }
+]
