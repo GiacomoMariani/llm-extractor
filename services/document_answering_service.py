@@ -5,6 +5,7 @@ from services.document_store import StoredDocument
 from services.exceptions import NotFoundError
 from services.retrieval_service import RetrievalService
 from services.rule_based_answerer import RuleBasedAnswerer
+from services.usage_tracking_service import SQLiteUsageTrackingService
 
 
 class DocumentStoreProtocol(Protocol):
@@ -18,10 +19,12 @@ class DocumentAnsweringService:
         store: DocumentStoreProtocol,
         retrieval_service: RetrievalService,
         answerer: RuleBasedAnswerer,
+        usage_tracking_service: SQLiteUsageTrackingService | None = None,
     ):
         self.store = store
         self.retrieval_service = retrieval_service
         self.answerer = answerer
+        self.usage_tracking_service = usage_tracking_service
 
     async def answer(
         self,
@@ -34,8 +37,10 @@ class DocumentAnsweringService:
         if stored_document is None:
             raise NotFoundError("Document not found.")
 
+        cleaned_question = question.strip()
+
         scored_chunks = self.retrieval_service.retrieve_with_scores(
-            question=question.strip(),
+            question=cleaned_question,
             chunks=stored_document.chunks,
             top_k=top_k,
         )
@@ -46,9 +51,21 @@ class DocumentAnsweringService:
         )
 
         answer_response = await self.answerer.answer(
-            question.strip(),
+            cleaned_question,
             combined_context,
         )
+
+        if self.usage_tracking_service is not None:
+            self.usage_tracking_service.record_usage(
+                operation="document_answer",
+                provider="local",
+                model_name=self.answerer.__class__.__name__,
+                input_text=f"{cleaned_question}\n\n{combined_context}",
+                output_text=answer_response.answer,
+                metadata={
+                    "document_id": document_id,
+                },
+            )
 
         citations = [
             Citation(

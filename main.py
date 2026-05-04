@@ -65,6 +65,18 @@ from services.evaluation_result_store import (
     sqlite_evaluation_result_store,
 )
 
+from models.usage import (
+    UsageRecentRequest,
+    UsageRecentResponse,
+    UsageRecordResponse,
+    UsageSummaryResponse,
+)
+
+from services.usage_tracking_service import (
+    SQLiteUsageTrackingService,
+    sqlite_usage_tracking_service,
+)
+
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 app = FastAPI()
@@ -178,6 +190,7 @@ def get_document_ingestion_service() -> DocumentIngestionService:
     return DocumentIngestionService(
         store=sqlite_document_store,
         embedding_provider=embedding_provider,
+        usage_tracking_service=sqlite_usage_tracking_service,
     )
 
 DocumentIngestionServiceDependency = Annotated[
@@ -222,6 +235,7 @@ def get_document_answering_service() -> DocumentAnsweringService:
         store=sqlite_document_store,
         retrieval_service=RetrievalService(embedding_provider),
         answerer=RuleBasedAnswerer(),
+        usage_tracking_service=sqlite_usage_tracking_service,
     )
 
 DocumentAnsweringServiceDependency = Annotated[
@@ -239,6 +253,14 @@ ChatServiceDependency = Annotated[
     Depends(get_chat_service),
 ]
 
+def get_usage_tracking_service() -> SQLiteUsageTrackingService:
+    return sqlite_usage_tracking_service
+
+
+UsageTrackingServiceDependency = Annotated[
+    SQLiteUsageTrackingService,
+    Depends(get_usage_tracking_service),
+]
 
 @app.get("/health", response_model=HealthResponse)
 async def health_check() -> HealthResponse:
@@ -489,4 +511,48 @@ async def get_latest_document_qa_eval(
             )
             for result in case_results
         ],
+    )
+
+@app.get(
+    "/usage/summary",
+    response_model=UsageSummaryResponse,
+    dependencies=[Depends(require_api_key)],
+)
+async def get_usage_summary(
+    usage_tracking_service: UsageTrackingServiceDependency,
+) -> UsageSummaryResponse:
+    recent_records = usage_tracking_service.list_recent_usage(limit=100)
+
+    return UsageSummaryResponse(
+        total_estimated_cost_usd=usage_tracking_service.get_total_estimated_cost_usd(),
+        recent_record_count=len(recent_records),
+    )
+
+
+@app.get(
+    "/usage/recent",
+    response_model=UsageRecentResponse,
+    dependencies=[Depends(require_api_key)],
+)
+async def get_recent_usage(
+    query: UsageRecentRequest = Depends(),
+    usage_tracking_service: UsageTrackingServiceDependency = None,
+) -> UsageRecentResponse:
+    records = usage_tracking_service.list_recent_usage(limit=query.limit)
+
+    return UsageRecentResponse(
+        records=[
+            UsageRecordResponse(
+                usage_id=record.usage_id,
+                operation=record.operation,
+                provider=record.provider,
+                model_name=record.model_name,
+                input_tokens=record.input_tokens,
+                output_tokens=record.output_tokens,
+                estimated_cost_usd=record.estimated_cost_usd,
+                metadata=record.metadata,
+                created_at=record.created_at,
+            )
+            for record in records
+        ]
     )
