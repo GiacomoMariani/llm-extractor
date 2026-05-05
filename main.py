@@ -55,6 +55,9 @@ from services.document_ingestion_worker import DocumentIngestionWorker
 from models.tool_assistant import ToolAssistantRequest, ToolAssistantResponse
 from services.tool_assistant_service import ToolAssistantService
 
+from models.ingestion_queue_model import StoredTextUploadIngestionPayload
+from services.uploaded_text_store import SQLiteUploadedTextStore, UploadedTextStore
+
 from models.evaluation import (
     DocumentQAEvalLatestRunResponse,
     DocumentQAEvalStoredCaseResultResponse,
@@ -76,6 +79,13 @@ from services.usage_tracking_service import (
     SQLiteUsageTrackingService,
     sqlite_usage_tracking_service,
 )
+
+from services.ingestion_queue import (
+    DocumentIngestionQueue,
+    FastAPIBackgroundTasksIngestionQueue,
+)
+
+from models.ingestion_queue_model import TextUploadIngestionPayload
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -262,6 +272,26 @@ UsageTrackingServiceDependency = Annotated[
     Depends(get_usage_tracking_service),
 ]
 
+def get_document_ingestion_queue(
+    background_tasks: BackgroundTasks,
+) -> DocumentIngestionQueue:
+    return FastAPIBackgroundTasksIngestionQueue(background_tasks)
+
+
+DocumentIngestionQueueDependency = Annotated[
+    DocumentIngestionQueue,
+    Depends(get_document_ingestion_queue),
+]
+
+def get_uploaded_text_store() -> UploadedTextStore:
+    return SQLiteUploadedTextStore()
+
+
+UploadedTextStoreDependency = Annotated[
+    UploadedTextStore,
+    Depends(get_uploaded_text_store),
+]
+
 @app.get("/health", response_model=HealthResponse)
 async def health_check() -> HealthResponse:
     return HealthResponse(status="ok")
@@ -359,8 +389,9 @@ async def answer_question(
     dependencies=[Depends(require_api_key)],
 )
 async def upload_document(
-    background_tasks: BackgroundTasks,
     ingestion_worker: DocumentIngestionWorkerDependency,
+    ingestion_queue: DocumentIngestionQueueDependency,
+    uploaded_text_store: UploadedTextStoreDependency,
     file: UploadFile = File(...),
 ) -> DocumentIngestionJobResponse:
     filename = file.filename or "uploaded.txt"
@@ -381,13 +412,21 @@ async def upload_document(
     if not text.strip():
         raise HTTPException(status_code=400, detail="Uploaded document is empty.")
 
+    content_id = uploaded_text_store.save_text(
+        filename=filename,
+        text=text,
+    )
+
     queued_job = ingestion_worker.create_text_upload_job(filename)
 
-    background_tasks.add_task(
-        ingestion_worker.process_existing_text_upload_job_safely,
-        queued_job.job_id,
-        filename,
-        text,
+    ingestion_queue.enqueue_stored_text_upload(
+        worker=ingestion_worker,
+        text_store=uploaded_text_store,
+        payload=StoredTextUploadIngestionPayload(
+            job_id=queued_job.job_id,
+            filename=filename,
+            content_id=content_id,
+        ),
     )
 
     return DocumentIngestionJobResponse(

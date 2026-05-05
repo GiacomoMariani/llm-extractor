@@ -1,10 +1,38 @@
 from fastapi.testclient import TestClient
 
 from main import app
+from services.uploaded_text_store import SQLiteUploadedTextStore
 
 client = TestClient(app)
 
 AUTH_HEADERS = {"X-API-Key": "test-secret-key"}
+
+
+class RecordingIngestionQueue:
+    def __init__(self) -> None:
+        self.text_upload_calls = []
+        self.stored_text_upload_calls = []
+
+    def enqueue_text_upload(self, worker, payload) -> None:
+        self.text_upload_calls.append(
+            {
+                "worker": worker,
+                "job_id": payload.job_id,
+                "filename": payload.filename,
+                "text": payload.text,
+            }
+        )
+
+    def enqueue_stored_text_upload(self, worker, text_store, payload) -> None:
+        self.stored_text_upload_calls.append(
+            {
+                "worker": worker,
+                "text_store": text_store,
+                "job_id": payload.job_id,
+                "filename": payload.filename,
+                "content_id": payload.content_id,
+            }
+        )
 
 
 def test_upload_document_requires_api_key():
@@ -49,6 +77,50 @@ def test_upload_document_returns_queued_ingestion_job():
     assert payload["error_message"] is None
     assert payload["created_at"]
     assert payload["updated_at"]
+
+
+def test_upload_document_uses_ingestion_queue_dependency(tmp_path):
+    import main
+
+    queue = RecordingIngestionQueue()
+    text_store = SQLiteUploadedTextStore(tmp_path / "uploaded_texts.db")
+
+    main.app.dependency_overrides[main.get_document_ingestion_queue] = lambda: queue
+    main.app.dependency_overrides[main.get_uploaded_text_store] = lambda: text_store
+
+    try:
+        response = client.post(
+            "/documents/upload",
+            headers=AUTH_HEADERS,
+            files={
+                "file": (
+                    "guide.txt",
+                    b"FastAPI is the backend framework.",
+                    "text/plain",
+                )
+            },
+        )
+    finally:
+        main.app.dependency_overrides.pop(main.get_document_ingestion_queue, None)
+        main.app.dependency_overrides.pop(main.get_uploaded_text_store, None)
+
+    assert response.status_code == 200
+
+    payload = response.json()
+    assert payload["status"] == "queued"
+
+    assert len(queue.text_upload_calls) == 0
+    assert len(queue.stored_text_upload_calls) == 1
+
+    call = queue.stored_text_upload_calls[0]
+
+    assert call["job_id"] == payload["job_id"]
+    assert call["filename"] == "guide.txt"
+    assert call["content_id"]
+    assert call["text_store"].get_text(call["content_id"]) == (
+        "FastAPI is the backend framework."
+    )
+    assert hasattr(call["worker"], "process_existing_text_upload_job_safely")
 
 
 def test_upload_document_job_can_be_fetched_after_background_completion():
