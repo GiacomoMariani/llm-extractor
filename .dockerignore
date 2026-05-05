@@ -4,7 +4,7 @@ __pycache__
 .git
 .idea
 .vscode
-app.db
+
 *.pyc
 *.pyo
 *.pyd
@@ -12,3 +12,9 @@ app.db
 .env
 .env.*
 !.env.example
+
+app.db
+uploaded_texts.db
+*.sqlite
+*.sqlite3
+data/
