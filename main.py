@@ -87,6 +87,14 @@ from services.ingestion_queue import (
 
 from models.ingestion_queue_model import TextUploadIngestionPayload
 
+from models.maintenance import (
+    UploadedTextCleanupRequest,
+    UploadedTextCleanupResponse,
+)
+from services.uploaded_text_cleanup_service import delete_stale_uploaded_texts
+
+from settings import get_settings
+
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 app = FastAPI()
@@ -284,7 +292,8 @@ DocumentIngestionQueueDependency = Annotated[
 ]
 
 def get_uploaded_text_store() -> UploadedTextStore:
-    return SQLiteUploadedTextStore()
+    settings = get_settings()
+    return SQLiteUploadedTextStore(settings.uploaded_text_db_path)
 
 
 UploadedTextStoreDependency = Annotated[
@@ -595,3 +604,32 @@ async def get_recent_usage(
             for record in records
         ]
     )
+
+@app.post(
+    "/admin/uploaded-texts/cleanup",
+    response_model=UploadedTextCleanupResponse,
+    dependencies=[Depends(require_api_key)],
+)
+async def cleanup_uploaded_texts(
+    request: UploadedTextCleanupRequest,
+    uploaded_text_store: UploadedTextStoreDependency,
+) -> UploadedTextCleanupResponse:
+    settings = get_settings()
+    max_age_hours = (
+        request.max_age_hours
+        if request.max_age_hours is not None
+        else settings.uploaded_text_cleanup_max_age_hours
+    )
+
+    deleted_count = delete_stale_uploaded_texts(
+        uploaded_text_store=uploaded_text_store,
+        max_age_hours=max_age_hours,
+    )
+
+    logger.info(
+        "Uploaded text cleanup completed max_age_hours=%s deleted_count=%s",
+        max_age_hours,
+        deleted_count,
+    )
+
+    return UploadedTextCleanupResponse(deleted_count=deleted_count)

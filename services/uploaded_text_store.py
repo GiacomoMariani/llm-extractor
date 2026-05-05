@@ -4,7 +4,7 @@ import sqlite3
 import uuid
 from pathlib import Path
 from typing import Protocol
-
+from datetime import datetime
 
 class UploadedTextStore(Protocol):
     def save_text(self, filename: str, text: str) -> str:
@@ -14,6 +14,9 @@ class UploadedTextStore(Protocol):
         ...
 
     def delete_text(self, content_id: str) -> bool:
+        ...
+
+    def delete_texts_created_before(self, cutoff: datetime) -> int:
         ...
 
 
@@ -80,3 +83,19 @@ class SQLiteUploadedTextStore:
             connection.commit()
 
         return cursor.rowcount > 0
+
+    def delete_texts_created_before(self, cutoff: datetime) -> int:
+        cutoff_value = cutoff.strftime("%Y-%m-%d %H:%M:%S")
+
+        with sqlite3.connect(self.db_path) as connection:
+            cursor = connection.execute(
+                """
+                DELETE
+                FROM uploaded_texts
+                WHERE created_at < ?
+                """,
+                (cutoff_value,),
+            )
+            connection.commit()
+
+        return cursor.rowcount
