@@ -2,6 +2,7 @@ from fastapi.testclient import TestClient
 
 from main import app
 from services.uploaded_text_store import SQLiteUploadedTextStore
+from tests.units.test_pdf_parser import _single_page_pdf_bytes
 
 client = TestClient(app)
 
@@ -156,8 +157,98 @@ def test_upload_document_job_can_be_fetched_after_background_completion():
     assert job_payload["chunk_count"] >= 1
     assert job_payload["error_message"] is None
 
+def test_upload_document_accepts_markdown_files(tmp_path):
+    import main
 
-def test_upload_document_rejects_non_txt_files():
+    queue = RecordingIngestionQueue()
+    text_store = SQLiteUploadedTextStore(tmp_path / "uploaded_texts.db")
+
+    main.app.dependency_overrides[main.get_document_ingestion_queue] = lambda: queue
+    main.app.dependency_overrides[main.get_uploaded_text_store] = lambda: text_store
+
+    try:
+        response = client.post(
+            "/documents/upload",
+            headers=AUTH_HEADERS,
+            files={
+                "file": (
+                    "guide.md",
+                    b"# Handbook\n\nRemote work is allowed.",
+                    "text/markdown",
+                )
+            },
+        )
+    finally:
+        main.app.dependency_overrides.pop(main.get_document_ingestion_queue, None)
+        main.app.dependency_overrides.pop(main.get_uploaded_text_store, None)
+
+    assert response.status_code == 200
+
+    assert len(queue.stored_text_upload_calls) == 1
+
+    call = queue.stored_text_upload_calls[0]
+
+    assert call["filename"] == "guide.md"
+    assert call["text_store"].get_text(call["content_id"]) == (
+        "# Handbook\n\nRemote work is allowed."
+    )
+
+def test_upload_document_accepts_pdf_files(tmp_path):
+    import main
+
+    queue = RecordingIngestionQueue()
+    text_store = SQLiteUploadedTextStore(tmp_path / "uploaded_texts.db")
+
+    main.app.dependency_overrides[main.get_document_ingestion_queue] = lambda: queue
+    main.app.dependency_overrides[main.get_uploaded_text_store] = lambda: text_store
+
+    try:
+        response = client.post(
+            "/documents/upload",
+            headers=AUTH_HEADERS,
+            files={
+                "file": (
+                    "remote-work.pdf",
+                    _single_page_pdf_bytes(),
+                    "application/pdf",
+                )
+            },
+        )
+    finally:
+        main.app.dependency_overrides.pop(main.get_document_ingestion_queue, None)
+        main.app.dependency_overrides.pop(main.get_uploaded_text_store, None)
+
+    assert response.status_code == 200
+
+    assert len(queue.stored_text_upload_calls) == 1
+
+    call = queue.stored_text_upload_calls[0]
+    stored_text = call["text_store"].get_text(call["content_id"])
+
+    assert call["filename"] == "remote-work.pdf"
+    assert "[Page 1]" in stored_text
+    assert "Remote work is allowed." in stored_text
+
+def test_upload_document_rejects_unsupported_files():
+    response = client.post(
+        "/documents/upload",
+        headers=AUTH_HEADERS,
+        files={
+            "file": (
+                "guide.docx",
+                b"not supported yet",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            )
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "detail": "Only .txt, .md, and .pdf files are supported."
+    }
+
+
+def test_upload_document_rejects_invalid_pdf():
     response = client.post(
         "/documents/upload",
         headers=AUTH_HEADERS,
@@ -172,7 +263,7 @@ def test_upload_document_rejects_non_txt_files():
 
     assert response.status_code == 400
     assert response.json() == {
-        "detail": "Only .txt files are supported."
+        "detail": "Uploaded file could not be read as a PDF."
     }
 
 

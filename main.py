@@ -93,6 +93,8 @@ from models.maintenance import (
 )
 from services.uploaded_text_cleanup_service import delete_stale_uploaded_texts
 
+from services.pdf_parser import extract_pdf_pages
+
 from settings import get_settings
 
 logger = logging.getLogger(__name__)
@@ -404,19 +406,35 @@ async def upload_document(
     file: UploadFile = File(...),
 ) -> DocumentIngestionJobResponse:
     filename = file.filename or "uploaded.txt"
-
-    if not filename.lower().endswith(".txt"):
-        raise HTTPException(status_code=400, detail="Only .txt files are supported.")
-
+    
     raw_bytes = await file.read()
+    lower_filename = filename.lower()
 
-    try:
-        text = raw_bytes.decode("utf-8")
-    except UnicodeDecodeError as ex:
+    if lower_filename.endswith((".txt", ".md")):
+        try:
+            text = raw_bytes.decode("utf-8")
+        except UnicodeDecodeError as ex:
+            raise HTTPException(
+                status_code=400,
+                detail="Document must be valid UTF-8 text.",
+            ) from ex
+
+    elif lower_filename.endswith(".pdf"):
+        try:
+            pages = extract_pdf_pages(raw_bytes)
+        except AppServiceError as ex:
+            raise HTTPException(status_code=400, detail=str(ex)) from ex
+
+        text = "\n\n".join(
+            f"[Page {page.page_number}]\n{page.text}"
+            for page in pages
+        )
+
+    else:
         raise HTTPException(
             status_code=400,
-            detail="Document must be valid UTF-8 text.",
-        ) from ex
+            detail="Only .txt, .md, and .pdf files are supported.",
+        )
 
     if not text.strip():
         raise HTTPException(status_code=400, detail="Uploaded document is empty.")
