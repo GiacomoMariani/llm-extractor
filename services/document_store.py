@@ -9,6 +9,11 @@ class StoredChunk:
     embedding: list[float]
     page_number: int | None = None
 
+@dataclass(frozen=True)
+class StoredDocumentSummary:
+    document_id: str
+    filename: str
+    chunk_count: int
 
 @dataclass(frozen=True)
 class StoredDocument:
@@ -52,6 +57,23 @@ class InMemoryDocumentStore:
 
     def get_document(self, document_id: str) -> StoredDocument | None:
         return self._documents.get(document_id)
+
+    def list_documents(self) -> list[StoredDocumentSummary]:
+        return [
+            StoredDocumentSummary(
+                document_id=document.document_id,
+                filename=document.filename,
+                chunk_count=len(document.chunks),
+            )
+            for document in self._documents.values()
+        ]
+
+    def delete_document(self, document_id: str) -> bool:
+        if document_id not in self._documents:
+            return False
+
+        del self._documents[document_id]
+        return True
 
     def clear(self) -> None:
         self._documents.clear()

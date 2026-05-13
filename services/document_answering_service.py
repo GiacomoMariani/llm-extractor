@@ -6,7 +6,6 @@ from services.exceptions import NotFoundError
 from services.retrieval_service import RetrievalService
 from services.rule_based_answerer import RuleBasedAnswerer
 from services.usage_tracking_service import SQLiteUsageTrackingService
-import re
 
 class DocumentStoreProtocol(Protocol):
     def get_document(self, document_id: str) -> StoredDocument | None:
@@ -71,7 +70,7 @@ class DocumentAnsweringService:
             Citation(
                 chunk_id=scored_chunk.chunk.chunk_id,
                 filename=stored_document.filename,
-                page_number=self._page_number(scored_chunk.chunk.text),
+                page_number=scored_chunk.chunk.page_number,
                 snippet=self._snippet(scored_chunk.chunk.text),
                 vector_score=scored_chunk.vector_score,
                 keyword_score=scored_chunk.keyword_score,
@@ -92,11 +91,3 @@ class DocumentAnsweringService:
             return cleaned
 
         return cleaned[:limit].rstrip() + "..."
-
-    def _page_number(self, text: str) -> int | None:
-        match = re.search(r"\[Page\s+(\d+)\]", text)
-
-        if match is None:
-            return None
-
-        return int(match.group(1))

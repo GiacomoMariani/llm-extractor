@@ -98,3 +98,75 @@ class DocumentIngestionWorker:
                 job_id,
                 filename,
             )
+
+    def create_document_reindex_job(self, document_id: str) -> IngestionJob:
+        stored_document = self.ingestion_service.store.get_document(document_id)
+
+        if stored_document is None:
+            raise AppServiceError("Document not found.")
+
+        return self.job_store.create_job(stored_document.filename)
+
+    async def process_existing_document_reindex_job(
+            self,
+            job_id: str,
+            document_id: str,
+    ) -> IngestionJob:
+        processing_job = self.job_store.mark_processing(job_id)
+
+        if processing_job is None:
+            raise AppServiceError("Ingestion job could not be marked as processing.")
+
+        try:
+            stored_document = await self.ingestion_service.reindex_document(document_id)
+
+            if stored_document is None:
+                raise AppServiceError("Document not found.")
+
+        except AppServiceError as ex:
+            self.job_store.mark_failed(
+                job_id=job_id,
+                error_message=str(ex),
+            )
+            raise
+        except Exception as ex:
+            logger.exception(
+                "Unexpected document re-index failure job_id=%s document_id=%s",
+                job_id,
+                document_id,
+            )
+
+            self.job_store.mark_failed(
+                job_id=job_id,
+                error_message="Unexpected document re-index failure.",
+            )
+
+            raise AppServiceError("Unexpected document re-index failure.") from ex
+
+        completed_job = self.job_store.mark_completed(
+            job_id=job_id,
+            document_id=stored_document.document_id,
+            chunk_count=len(stored_document.chunks),
+        )
+
+        if completed_job is None:
+            raise AppServiceError("Ingestion job could not be completed.")
+
+        return completed_job
+
+    async def process_existing_document_reindex_job_safely(
+            self,
+            job_id: str,
+            document_id: str,
+    ) -> None:
+        try:
+            await self.process_existing_document_reindex_job(
+                job_id=job_id,
+                document_id=document_id,
+            )
+        except AppServiceError:
+            logger.warning(
+                "Document re-index job failed job_id=%s document_id=%s",
+                job_id,
+                document_id,
+            )

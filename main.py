@@ -5,7 +5,7 @@ import time
 from uuid import uuid4
 
 from auth import require_api_key
-from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel, Field
 
 from models.health import HealthResponse
@@ -36,6 +36,12 @@ from models.document_qa import (
     DocumentAskResponse,
     DocumentIngestionJobResponse,
     DocumentUploadResponse,
+    DocumentListResponse,
+    DocumentSummaryResponse,
+    DocumentDeleteResponse,
+    DocumentReindexResponse,
+    DocumentQueryLogListResponse,
+    DocumentQueryLogResponse,
 )
 
 from services.document_answering_service import DocumentAnsweringService
@@ -55,7 +61,7 @@ from services.document_ingestion_worker import DocumentIngestionWorker
 from models.tool_assistant import ToolAssistantRequest, ToolAssistantResponse
 from services.tool_assistant_service import ToolAssistantService
 
-from models.ingestion_queue_model import StoredTextUploadIngestionPayload
+from models.ingestion_queue_model import StoredTextUploadIngestionPayload, DocumentReindexIngestionPayload
 from services.uploaded_text_store import SQLiteUploadedTextStore, UploadedTextStore
 
 from models.evaluation import (
@@ -92,6 +98,11 @@ from models.maintenance import (
     UploadedTextCleanupResponse,
 )
 from services.uploaded_text_cleanup_service import delete_stale_uploaded_texts
+
+from services.document_query_log_store import (
+    SQLiteDocumentQueryLogStore,
+    sqlite_document_query_log_store,
+)
 
 from services.pdf_parser import extract_pdf_pages
 
@@ -303,6 +314,15 @@ UploadedTextStoreDependency = Annotated[
     Depends(get_uploaded_text_store),
 ]
 
+def get_document_query_log_store() -> SQLiteDocumentQueryLogStore:
+    return sqlite_document_query_log_store
+
+
+DocumentQueryLogStoreDependency = Annotated[
+    SQLiteDocumentQueryLogStore,
+    Depends(get_document_query_log_store),
+]
+
 @app.get("/health", response_model=HealthResponse)
 async def health_check() -> HealthResponse:
     return HealthResponse(status="ok")
@@ -406,7 +426,7 @@ async def upload_document(
     file: UploadFile = File(...),
 ) -> DocumentIngestionJobResponse:
     filename = file.filename or "uploaded.txt"
-    
+
     raw_bytes = await file.read()
     lower_filename = filename.lower()
 
@@ -468,6 +488,74 @@ async def upload_document(
     )
 
 @app.get(
+    "/documents",
+    response_model=DocumentListResponse,
+    dependencies=[Depends(require_api_key)],
+)
+async def list_documents() -> DocumentListResponse:
+    documents = sqlite_document_store.list_documents()
+
+    return DocumentListResponse(
+        documents=[
+            DocumentSummaryResponse(
+                document_id=document.document_id,
+                filename=document.filename,
+                chunk_count=document.chunk_count,
+            )
+            for document in documents
+        ]
+    )
+
+@app.post(
+    "/documents/{document_id}/reindex",
+    response_model=DocumentReindexResponse,
+    dependencies=[Depends(require_api_key)],
+)
+async def reindex_document(
+    document_id: str,
+    ingestion_worker: DocumentIngestionWorkerDependency,
+    ingestion_queue: DocumentIngestionQueueDependency,
+) -> DocumentReindexResponse:
+    try:
+        job = ingestion_worker.create_document_reindex_job(document_id)
+    except AppServiceError as ex:
+        raise HTTPException(status_code=404, detail=str(ex)) from ex
+
+    ingestion_queue.enqueue_document_reindex(
+        worker=ingestion_worker,
+        payload=DocumentReindexIngestionPayload(
+            job_id=job.job_id,
+            document_id=document_id,
+        ),
+    )
+
+    return DocumentReindexResponse(
+        job_id=job.job_id,
+        document_id=document_id,
+        filename=job.filename,
+        status=job.status,
+    )
+
+@app.delete(
+    "/documents/{document_id}",
+    response_model=DocumentDeleteResponse,
+    dependencies=[Depends(require_api_key)],
+)
+async def delete_document(document_id: str) -> DocumentDeleteResponse:
+    deleted = sqlite_document_store.delete_document(document_id)
+
+    if not deleted:
+        raise HTTPException(
+            status_code=404,
+            detail="Document not found.",
+        )
+
+    return DocumentDeleteResponse(
+        document_id=document_id,
+        deleted=True,
+    )
+
+@app.get(
     "/documents/jobs/{job_id}",
     response_model=DocumentIngestionJobResponse,
     dependencies=[Depends(require_api_key)],
@@ -501,9 +589,12 @@ async def get_document_ingestion_job(
 async def ask_document_question(
     request: DocumentAskRequest,
     document_answering_service: DocumentAnsweringServiceDependency,
+    document_query_log_store: DocumentQueryLogStoreDependency,
 ) -> DocumentAskResponse:
+    start_time = time.perf_counter()
+
     try:
-        return await document_answering_service.answer(
+        response = await document_answering_service.answer(
             document_id=request.document_id,
             question=request.question,
             top_k=request.top_k,
@@ -513,6 +604,20 @@ async def ask_document_question(
             raise HTTPException(status_code=404, detail=str(ex)) from ex
 
         raise HTTPException(status_code=500, detail=str(ex)) from ex
+
+    latency_ms = (time.perf_counter() - start_time) * 1000
+
+    document_query_log_store.record_query(
+        document_id=request.document_id,
+        question=request.question,
+        answer=response.answer,
+        citation_count=len(response.citations),
+        latency_ms=latency_ms,
+        was_fallback=len(response.citations) == 0,
+    )
+
+    return response
+
 @app.post(
     "/tool-assistant",
     response_model=ToolAssistantResponse,
@@ -651,3 +756,30 @@ async def cleanup_uploaded_texts(
     )
 
     return UploadedTextCleanupResponse(deleted_count=deleted_count)
+
+@app.get(
+    "/admin/document-query-logs",
+    response_model=DocumentQueryLogListResponse,
+    dependencies=[Depends(require_api_key)],
+)
+async def list_document_query_logs(
+    document_query_log_store: DocumentQueryLogStoreDependency,
+    limit: int = Query(default=50, ge=1, le=100),
+) -> DocumentQueryLogListResponse:
+    logs = document_query_log_store.list_recent(limit=limit)
+
+    return DocumentQueryLogListResponse(
+        logs=[
+            DocumentQueryLogResponse(
+                query_id=log.query_id,
+                document_id=log.document_id,
+                question=log.question,
+                answer=log.answer,
+                citation_count=log.citation_count,
+                latency_ms=log.latency_ms,
+                was_fallback=log.was_fallback,
+                created_at=log.created_at,
+            )
+            for log in logs
+        ]
+    )

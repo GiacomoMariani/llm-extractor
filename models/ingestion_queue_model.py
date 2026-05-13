@@ -11,3 +11,7 @@ class StoredTextUploadIngestionPayload(BaseModel):
     job_id: str = Field(..., min_length=1)
     filename: str = Field(..., min_length=1)
     content_id: str = Field(..., min_length=1)
+
+class DocumentReindexIngestionPayload(BaseModel):
+    job_id: str = Field(..., min_length=1)
+    document_id: str = Field(..., min_length=1)

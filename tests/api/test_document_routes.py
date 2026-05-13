@@ -13,6 +13,7 @@ class RecordingIngestionQueue:
     def __init__(self) -> None:
         self.text_upload_calls = []
         self.stored_text_upload_calls = []
+        self.document_reindex_calls = []
 
     def enqueue_text_upload(self, worker, payload) -> None:
         self.text_upload_calls.append(
@@ -35,6 +36,14 @@ class RecordingIngestionQueue:
             }
         )
 
+    def enqueue_document_reindex(self, worker, payload) -> None:
+        self.document_reindex_calls.append(
+            {
+                "worker": worker,
+                "job_id": payload.job_id,
+                "document_id": payload.document_id,
+            }
+        )
 
 def test_upload_document_requires_api_key():
     response = client.post(
@@ -455,3 +464,267 @@ def test_ask_pdf_document_returns_page_number_in_citation():
     assert first_citation["filename"] == "remote-work.pdf"
     assert first_citation["page_number"] == 1
     assert "Remote work is allowed." in first_citation["snippet"]
+
+def test_list_documents_requires_api_key():
+    response = client.get("/documents")
+
+    assert response.status_code == 401
+    assert response.json() == {
+        "detail": "Invalid or missing API key."
+    }
+
+def test_list_documents_returns_uploaded_documents():
+    upload_response = client.post(
+        "/documents/upload",
+        headers=AUTH_HEADERS,
+        files={
+            "file": (
+                "guide.txt",
+                b"FastAPI is the backend framework. Testing is important.",
+                "text/plain",
+            )
+        },
+    )
+
+    assert upload_response.status_code == 200
+
+    job_id = upload_response.json()["job_id"]
+
+    job_response = client.get(
+        f"/documents/jobs/{job_id}",
+        headers=AUTH_HEADERS,
+    )
+
+    assert job_response.status_code == 200
+
+    document_id = job_response.json()["document_id"]
+    assert document_id is not None
+
+    response = client.get("/documents", headers=AUTH_HEADERS)
+
+    assert response.status_code == 200
+
+    payload = response.json()
+
+    assert payload["documents"] == [
+        {
+            "document_id": document_id,
+            "filename": "guide.txt",
+            "chunk_count": job_response.json()["chunk_count"],
+        }
+    ]
+
+def test_delete_document_requires_api_key():
+    response = client.delete("/documents/doc-missing")
+
+    assert response.status_code == 401
+    assert response.json() == {
+        "detail": "Invalid or missing API key."
+    }
+
+
+def test_delete_document_returns_404_for_unknown_document():
+    response = client.delete(
+        "/documents/doc-missing",
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {
+        "detail": "Document not found."
+    }
+
+
+def test_delete_document_removes_uploaded_document():
+    upload_response = client.post(
+        "/documents/upload",
+        headers=AUTH_HEADERS,
+        files={
+            "file": (
+                "guide.txt",
+                b"FastAPI is the backend framework. Testing is important.",
+                "text/plain",
+            )
+        },
+    )
+
+    assert upload_response.status_code == 200
+
+    job_id = upload_response.json()["job_id"]
+
+    job_response = client.get(
+        f"/documents/jobs/{job_id}",
+        headers=AUTH_HEADERS,
+    )
+
+    assert job_response.status_code == 200
+
+    document_id = job_response.json()["document_id"]
+    assert document_id is not None
+
+    delete_response = client.delete(
+        f"/documents/{document_id}",
+        headers=AUTH_HEADERS,
+    )
+
+    assert delete_response.status_code == 200
+    assert delete_response.json() == {
+        "document_id": document_id,
+        "deleted": True,
+    }
+
+    list_response = client.get("/documents", headers=AUTH_HEADERS)
+
+    assert list_response.status_code == 200
+    assert list_response.json() == {
+        "documents": []
+    }
+
+def test_reindex_document_requires_api_key():
+    response = client.post("/documents/doc-missing/reindex")
+
+    assert response.status_code == 401
+    assert response.json() == {
+        "detail": "Invalid or missing API key."
+    }
+
+
+def test_reindex_document_returns_404_for_unknown_document():
+    response = client.post(
+        "/documents/doc-missing/reindex",
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {
+        "detail": "Document not found."
+    }
+
+
+def test_reindex_document_enqueues_reindex_job(tmp_path):
+    import main
+
+    queue = RecordingIngestionQueue()
+    text_store = SQLiteUploadedTextStore(tmp_path / "uploaded_texts.db")
+
+    main.app.dependency_overrides[main.get_document_ingestion_queue] = lambda: queue
+    main.app.dependency_overrides[main.get_uploaded_text_store] = lambda: text_store
+
+    try:
+        upload_response = client.post(
+            "/documents/upload",
+            headers=AUTH_HEADERS,
+            files={
+                "file": (
+                    "guide.txt",
+                    b"FastAPI is the backend framework. Testing is important.",
+                    "text/plain",
+                )
+            },
+        )
+
+        assert upload_response.status_code == 200
+
+        original_upload_call = queue.stored_text_upload_calls[0]
+        document = main.sqlite_document_store.save_document(
+            filename=original_upload_call["filename"],
+            text=original_upload_call["text_store"].get_text(
+                original_upload_call["content_id"]
+            ),
+            chunk_payloads=[
+                {
+                    "text": "FastAPI is the backend framework.",
+                    "embedding": [1.0, 0.0],
+                    "page_number": None,
+                }
+            ],
+        )
+
+        response = client.post(
+            f"/documents/{document.document_id}/reindex",
+            headers=AUTH_HEADERS,
+        )
+    finally:
+        main.app.dependency_overrides.pop(main.get_document_ingestion_queue, None)
+        main.app.dependency_overrides.pop(main.get_uploaded_text_store, None)
+
+    assert response.status_code == 200
+
+    payload = response.json()
+
+    assert payload["document_id"] == document.document_id
+    assert payload["filename"] == "guide.txt"
+    assert payload["status"] == "queued"
+
+    assert len(queue.document_reindex_calls) == 1
+    assert queue.document_reindex_calls[0]["document_id"] == document.document_id
+    assert queue.document_reindex_calls[0]["job_id"] == payload["job_id"]
+
+def test_list_document_query_logs_requires_api_key():
+    response = client.get("/admin/document-query-logs")
+
+    assert response.status_code == 401
+    assert response.json() == {
+        "detail": "Invalid or missing API key."
+    }
+
+
+def test_list_document_query_logs_returns_recent_document_questions():
+    upload_response = client.post(
+        "/documents/upload",
+        headers=AUTH_HEADERS,
+        files={
+            "file": (
+                "guide.txt",
+                b"FastAPI is the backend framework. Testing is important.",
+                "text/plain",
+            )
+        },
+    )
+
+    assert upload_response.status_code == 200
+
+    job_id = upload_response.json()["job_id"]
+
+    job_response = client.get(
+        f"/documents/jobs/{job_id}",
+        headers=AUTH_HEADERS,
+    )
+
+    assert job_response.status_code == 200
+
+    document_id = job_response.json()["document_id"]
+    assert document_id is not None
+
+    ask_response = client.post(
+        "/documents/ask",
+        headers=AUTH_HEADERS,
+        json={
+            "document_id": document_id,
+            "question": "What is used for the backend?",
+            "top_k": 1,
+        },
+    )
+
+    assert ask_response.status_code == 200
+
+    response = client.get(
+        "/admin/document-query-logs",
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 200
+
+    payload = response.json()
+    assert len(payload["logs"]) == 1
+
+    log = payload["logs"][0]
+
+    assert log["query_id"].startswith("query-")
+    assert log["document_id"] == document_id
+    assert log["question"] == "What is used for the backend?"
+    assert "FastAPI" in log["answer"]
+    assert log["citation_count"] >= 1
+    assert log["latency_ms"] >= 0
+    assert log["was_fallback"] is False
+    assert log["created_at"]

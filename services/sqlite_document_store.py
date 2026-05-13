@@ -4,8 +4,7 @@ import sqlite3
 from pathlib import Path
 from uuid import uuid4
 
-from services.document_store import StoredChunk, StoredDocument
-
+from services.document_store import StoredChunk, StoredDocument, StoredDocumentSummary
 
 class SQLiteDocumentStore:
     def __init__(self, db_path: str = "app.db"):
@@ -79,7 +78,7 @@ class SQLiteDocumentStore:
                 cursor.execute("ALTER TABLE chunks ADD COLUMN page_number INTEGER")
 
             connection.commit()
-            
+
     def save_document(
         self,
         filename: str,
@@ -180,6 +179,137 @@ class SQLiteDocumentStore:
             document_id=document_row[0],
             filename=document_row[1],
             original_text=document_row[2],
+            chunks=chunks,
+        )
+
+    def list_documents(self) -> list[StoredDocumentSummary]:
+        with sqlite3.connect(self.db_path) as connection:
+            cursor = connection.cursor()
+
+            cursor.execute(
+                """
+                SELECT documents.document_id,
+                       documents.filename,
+                       COUNT(chunks.chunk_id) AS chunk_count
+                FROM documents
+                         LEFT JOIN chunks
+                                   ON chunks.document_id = documents.document_id
+                GROUP BY documents.document_id, documents.filename
+                ORDER BY documents.rowid
+                """
+            )
+
+            rows = cursor.fetchall()
+
+        return [
+            StoredDocumentSummary(
+                document_id=document_id,
+                filename=filename,
+                chunk_count=chunk_count,
+            )
+            for document_id, filename, chunk_count in rows
+        ]
+
+    def delete_document(self, document_id: str) -> bool:
+        with sqlite3.connect(self.db_path) as connection:
+            cursor = connection.cursor()
+
+            cursor.execute(
+                "SELECT 1 FROM documents WHERE document_id = ?",
+                (document_id,),
+            )
+
+            if cursor.fetchone() is None:
+                return False
+
+            cursor.execute(
+                "DELETE FROM chunks WHERE document_id = ?",
+                (document_id,),
+            )
+            cursor.execute(
+                "DELETE FROM documents WHERE document_id = ?",
+                (document_id,),
+            )
+
+            connection.commit()
+
+        return True
+
+    def replace_document_chunks(
+            self,
+            document_id: str,
+            chunk_payloads: list[dict[str, object]],
+    ) -> StoredDocument | None:
+        chunks: list[StoredChunk] = []
+
+        with sqlite3.connect(self.db_path) as connection:
+            cursor = connection.cursor()
+
+            cursor.execute(
+                """
+                SELECT filename, original_text
+                FROM documents
+                WHERE document_id = ?
+                """,
+                (document_id,),
+            )
+
+            document_row = cursor.fetchone()
+
+            if document_row is None:
+                return None
+
+            filename = document_row[0]
+            original_text = document_row[1]
+
+            cursor.execute(
+                """
+                DELETE
+                FROM chunks
+                WHERE document_id = ?
+                """,
+                (document_id,),
+            )
+
+            for index, chunk_payload in enumerate(chunk_payloads, start=1):
+                chunk_id = f"{document_id}-chunk-{index}"
+                chunk_text = chunk_payload["text"]
+                chunk_embedding = chunk_payload["embedding"]
+                page_number = chunk_payload.get("page_number")
+
+                cursor.execute(
+                    """
+                    INSERT INTO chunks (chunk_id,
+                                        document_id,
+                                        text,
+                                        embedding,
+                                        page_number)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (
+                        chunk_id,
+                        document_id,
+                        chunk_text,
+                        json.dumps(chunk_embedding),
+                        page_number,
+                    ),
+                )
+
+                chunks.append(
+                    StoredChunk(
+                        chunk_id=chunk_id,
+                        text=chunk_text,
+                        embedding=chunk_embedding,
+                        page_number=page_number,
+                    )
+                )
+
+            connection.commit()
+
+        return StoredDocument(
+            document_id=document_id,
+            filename=filename,
+            original_text=original_text,
             chunks=chunks,
         )
 

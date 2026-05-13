@@ -32,7 +32,38 @@ class Citation(BaseModel):
     keyword_score: float
     hybrid_score: float
 
+class DocumentSummaryResponse(BaseModel):
+    document_id: str
+    filename: str
+    chunk_count: int
+
+class DocumentListResponse(BaseModel):
+    documents: list[DocumentSummaryResponse]
+
+class DocumentDeleteResponse(BaseModel):
+    document_id: str
+    deleted: bool
 
 class DocumentAskResponse(BaseModel):
     answer: str
     citations: list[Citation]
+
+class DocumentReindexResponse(BaseModel):
+    job_id: str
+    document_id: str
+    filename: str
+    status: str
+
+class DocumentQueryLogResponse(BaseModel):
+    query_id: str
+    document_id: str
+    question: str
+    answer: str
+    citation_count: int
+    latency_ms: float
+    was_fallback: bool
+    created_at: str
+
+
+class DocumentQueryLogListResponse(BaseModel):
+    logs: list[DocumentQueryLogResponse]

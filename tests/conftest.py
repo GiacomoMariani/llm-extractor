@@ -1,5 +1,5 @@
-import sys
 from pathlib import Path
+import sys
 
 import pytest
 
@@ -9,6 +9,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import main
+from services.document_query_log_store import SQLiteDocumentQueryLogStore
 from services.evaluation_result_store import SQLiteEvaluationResultStore
 from services.ingestion_job_store import SQLiteIngestionJobStore
 from services.sqlite_document_store import SQLiteDocumentStore
@@ -23,6 +24,7 @@ def use_test_sqlite_store(tmp_path, monkeypatch):
     test_job_store = SQLiteIngestionJobStore(str(test_db_path))
     test_evaluation_result_store = SQLiteEvaluationResultStore(str(test_db_path))
     test_usage_tracking_service = SQLiteUsageTrackingService(str(test_db_path))
+    test_document_query_log_store = SQLiteDocumentQueryLogStore(str(test_db_path))
 
     monkeypatch.setattr(main, "sqlite_document_store", test_store)
     monkeypatch.setattr(main, "sqlite_ingestion_job_store", test_job_store)
@@ -36,9 +38,15 @@ def use_test_sqlite_store(tmp_path, monkeypatch):
         "sqlite_usage_tracking_service",
         test_usage_tracking_service,
     )
+    monkeypatch.setattr(
+        main,
+        "sqlite_document_query_log_store",
+        test_document_query_log_store,
+    )
 
     yield
 
+    test_document_query_log_store.clear()
     test_usage_tracking_service.clear()
     test_evaluation_result_store.clear()
     test_job_store.clear()

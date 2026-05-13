@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol
-
 from fastapi import BackgroundTasks
 
 from models.ingestion_queue_model import (
+    DocumentReindexIngestionPayload,
     StoredTextUploadIngestionPayload,
     TextUploadIngestionPayload,
 )
@@ -30,6 +30,13 @@ class DocumentIngestionQueue(Protocol):
         worker: DocumentIngestionWorker,
         text_store: UploadedTextStore,
         payload: StoredTextUploadIngestionPayload,
+    ) -> None:
+        ...
+
+    def enqueue_document_reindex(
+            self,
+            worker: DocumentIngestionWorker,
+            payload: DocumentReindexIngestionPayload,
     ) -> None:
         ...
 
@@ -61,4 +68,15 @@ class FastAPIBackgroundTasksIngestionQueue:
             worker,
             text_store,
             payload,
+        )
+
+    def enqueue_document_reindex(
+            self,
+            worker: DocumentIngestionWorker,
+            payload: DocumentReindexIngestionPayload,
+    ) -> None:
+        self.background_tasks.add_task(
+            worker.process_existing_document_reindex_job_safely,
+            payload.job_id,
+            payload.document_id,
         )
