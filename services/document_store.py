@@ -7,6 +7,7 @@ class StoredChunk:
     chunk_id: str
     text: str
     embedding: list[float]
+    page_number: int | None = None
 
 
 @dataclass(frozen=True)
@@ -34,6 +35,7 @@ class InMemoryDocumentStore:
                 chunk_id=f"{document_id}-chunk-{index + 1}",
                 text=chunk_payload["text"],
                 embedding=chunk_payload["embedding"],
+                page_number=chunk_payload.get("page_number"),
             )
             for index, chunk_payload in enumerate(chunk_payloads)
         ]

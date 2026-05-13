@@ -20,28 +20,66 @@ class SQLiteDocumentStore:
 
             cursor.execute(
                 """
-                CREATE TABLE IF NOT EXISTS documents (
-                    document_id TEXT PRIMARY KEY,
-                    filename TEXT NOT NULL,
-                    original_text TEXT NOT NULL
+                CREATE TABLE IF NOT EXISTS documents
+                (
+                    document_id
+                    TEXT
+                    PRIMARY
+                    KEY,
+                    filename
+                    TEXT
+                    NOT
+                    NULL,
+                    original_text
+                    TEXT
+                    NOT
+                    NULL
                 )
                 """
             )
 
             cursor.execute(
                 """
-                CREATE TABLE IF NOT EXISTS chunks (
-                    chunk_id TEXT PRIMARY KEY,
-                    document_id TEXT NOT NULL,
-                    text TEXT NOT NULL,
-                    embedding TEXT NOT NULL,
-                    FOREIGN KEY (document_id) REFERENCES documents(document_id)
+                CREATE TABLE IF NOT EXISTS chunks
+                (
+                    chunk_id
+                    TEXT
+                    PRIMARY
+                    KEY,
+                    document_id
+                    TEXT
+                    NOT
+                    NULL,
+                    text
+                    TEXT
+                    NOT
+                    NULL,
+                    embedding
+                    TEXT
+                    NOT
+                    NULL,
+                    page_number
+                    INTEGER,
+                    FOREIGN
+                    KEY
+                (
+                    document_id
+                ) REFERENCES documents
+                (
+                    document_id
                 )
+                    )
                 """
             )
 
-            connection.commit()
+            cursor.execute("PRAGMA table_info(chunks)")
+            chunk_columns = {row[1] for row in cursor.fetchall()}
 
+            if "page_number" not in chunk_columns:
+                cursor.execute("ALTER TABLE chunks ADD COLUMN page_number INTEGER")
+
+            connection.commit()
+            
     def save_document(
         self,
         filename: str,
@@ -70,14 +108,15 @@ class SQLiteDocumentStore:
 
                 cursor.execute(
                     """
-                    INSERT INTO chunks (chunk_id, document_id, text, embedding)
-                    VALUES (?, ?, ?, ?)
+                    INSERT INTO chunks (chunk_id, document_id, text, embedding, page_number)
+                    VALUES (?, ?, ?, ?, ?)
                     """,
                     (
                         chunk_id,
                         document_id,
                         chunk_text,
                         json.dumps(chunk_embedding),
+                        chunk_payload.get("page_number"),
                     ),
                 )
 
@@ -86,6 +125,7 @@ class SQLiteDocumentStore:
                         chunk_id=chunk_id,
                         text=chunk_text,
                         embedding=chunk_embedding,
+                        page_number=chunk_payload.get("page_number"),
                     )
                 )
 
@@ -117,7 +157,7 @@ class SQLiteDocumentStore:
 
             cursor.execute(
                 """
-                SELECT chunk_id, text, embedding
+                SELECT chunk_id, text, embedding, page_number
                 FROM chunks
                 WHERE document_id = ?
                 ORDER BY rowid
@@ -131,8 +171,9 @@ class SQLiteDocumentStore:
                 chunk_id=chunk_id,
                 text=text,
                 embedding=json.loads(embedding),
+                page_number=page_number,
             )
-            for chunk_id, text, embedding in chunk_rows
+            for chunk_id, text, embedding, page_number in chunk_rows
         ]
 
         return StoredDocument(

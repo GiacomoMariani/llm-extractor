@@ -385,7 +385,9 @@ def test_ask_document_returns_grounded_answer_with_citations():
     first_citation = payload["citations"][0]
 
     assert first_citation["chunk_id"].startswith(f"{document_id}-chunk-")
+    assert first_citation["filename"] == "guide.txt"
     assert first_citation["snippet"]
+    assert first_citation["page_number"] is None
     assert 0.0 <= first_citation["vector_score"] <= 1.0
     assert 0.0 <= first_citation["keyword_score"] <= 1.0
     assert 0.0 <= first_citation["hybrid_score"] <= 1.0
@@ -405,3 +407,51 @@ def test_ask_document_returns_404_for_unknown_document():
     assert response.json() == {
         "detail": "Document not found."
     }
+
+def test_ask_pdf_document_returns_page_number_in_citation():
+    upload_response = client.post(
+        "/documents/upload",
+        headers=AUTH_HEADERS,
+        files={
+            "file": (
+                "remote-work.pdf",
+                _single_page_pdf_bytes(),
+                "application/pdf",
+            )
+        },
+    )
+
+    assert upload_response.status_code == 200
+
+    job_id = upload_response.json()["job_id"]
+
+    job_response = client.get(
+        f"/documents/jobs/{job_id}",
+        headers=AUTH_HEADERS,
+    )
+
+    assert job_response.status_code == 200
+
+    document_id = job_response.json()["document_id"]
+    assert document_id is not None
+
+    response = client.post(
+        "/documents/ask",
+        headers=AUTH_HEADERS,
+        json={
+            "document_id": document_id,
+            "question": "Is remote work allowed?",
+            "top_k": 1,
+        },
+    )
+
+    assert response.status_code == 200
+
+    payload = response.json()
+    assert len(payload["citations"]) >= 1
+
+    first_citation = payload["citations"][0]
+
+    assert first_citation["filename"] == "remote-work.pdf"
+    assert first_citation["page_number"] == 1
+    assert "Remote work is allowed." in first_citation["snippet"]

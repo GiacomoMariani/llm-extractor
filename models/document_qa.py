@@ -23,9 +23,10 @@ class DocumentAskRequest(BaseModel):
     question: str = Field(min_length=1, max_length=1000)
     top_k: int = Field(default=3, ge=1, le=10)
 
-
 class Citation(BaseModel):
     chunk_id: str
+    filename: str
+    page_number: int | None = None
     snippet: str
     vector_score: float
     keyword_score: float
