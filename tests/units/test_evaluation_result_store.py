@@ -13,6 +13,7 @@ def _build_summary() -> DocumentQAEvalSummary:
                 name="passing_case",
                 passed=True,
                 answer="FastAPI is the backend framework.",
+                was_fallback=False,
                 citation_count=1,
                 checks=["Answer contains 'FastAPI'."],
                 failures=[],
@@ -23,6 +24,7 @@ def _build_summary() -> DocumentQAEvalSummary:
                 name="failing_case",
                 passed=False,
                 answer="I could not find the answer.",
+                was_fallback=True,
                 citation_count=0,
                 checks=[],
                 failures=["Answer does not contain 'Django'."],
@@ -31,7 +33,6 @@ def _build_summary() -> DocumentQAEvalSummary:
             ),
         ],
     )
-
 
 def test_save_summary_stores_evaluation_run(tmp_path):
     store = SQLiteEvaluationResultStore(str(tmp_path / "test_eval.db"))
@@ -86,6 +87,7 @@ def test_get_case_results_returns_results_for_run(tmp_path):
     assert passing_case.failures == []
     assert passing_case.latency_ms == 10.0
     assert passing_case.document_id == "doc-123"
+    assert passing_case.was_fallback is False
 
     failing_case = case_results[1]
     assert failing_case.run_id == stored_run.run_id
@@ -97,7 +99,7 @@ def test_get_case_results_returns_results_for_run(tmp_path):
     assert failing_case.failures == ["Answer does not contain 'Django'."]
     assert failing_case.latency_ms == 15.0
     assert failing_case.document_id is None
-
+    assert failing_case.was_fallback is True
 
 def test_get_case_results_returns_empty_list_for_unknown_run(tmp_path):
     store = SQLiteEvaluationResultStore(str(tmp_path / "test_eval.db"))

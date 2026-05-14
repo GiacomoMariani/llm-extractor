@@ -691,6 +691,7 @@ async def get_latest_document_qa_eval(
                 name=result.name,
                 passed=result.passed,
                 answer=result.answer,
+                was_fallback=result.was_fallback,
                 citation_count=result.citation_count,
                 checks=result.checks,
                 failures=result.failures,

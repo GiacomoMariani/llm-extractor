@@ -42,6 +42,7 @@ def test_get_latest_document_qa_eval_returns_latest_saved_run():
                 name="first_case",
                 passed=True,
                 answer="FastAPI is the backend framework.",
+                was_fallback=False,
                 citation_count=1,
                 checks=["Answer contains 'FastAPI'."],
                 failures=[],
@@ -61,6 +62,7 @@ def test_get_latest_document_qa_eval_returns_latest_saved_run():
                 name="passing_case",
                 passed=True,
                 answer="Hybrid retrieval combines vector similarity with keyword search.",
+                was_fallback=False,
                 citation_count=1,
                 checks=["Answer contains 'Hybrid retrieval'."],
                 failures=[],
@@ -71,6 +73,7 @@ def test_get_latest_document_qa_eval_returns_latest_saved_run():
                 name="failing_case",
                 passed=False,
                 answer="I could not find the answer.",
+                was_fallback=True,
                 citation_count=0,
                 checks=[],
                 failures=["Answer does not contain 'Docker'."],
@@ -106,6 +109,7 @@ def test_get_latest_document_qa_eval_returns_latest_saved_run():
     assert passing_case["answer"] == (
         "Hybrid retrieval combines vector similarity with keyword search."
     )
+    assert passing_case["was_fallback"] is False
     assert passing_case["citation_count"] == 1
     assert passing_case["checks"] == ["Answer contains 'Hybrid retrieval'."]
     assert passing_case["failures"] == []
@@ -116,6 +120,7 @@ def test_get_latest_document_qa_eval_returns_latest_saved_run():
     assert failing_case["name"] == "failing_case"
     assert failing_case["passed"] is False
     assert failing_case["answer"] == "I could not find the answer."
+    assert failing_case["was_fallback"] is True
     assert failing_case["citation_count"] == 0
     assert failing_case["checks"] == []
     assert failing_case["failures"] == ["Answer does not contain 'Docker'."]

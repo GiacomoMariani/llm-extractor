@@ -15,6 +15,7 @@ class StoredEvaluationCaseResult:
     name: str
     passed: bool
     answer: str
+    was_fallback: bool
     citation_count: int
     checks: list[str]
     failures: list[str]
@@ -64,6 +65,7 @@ class SQLiteEvaluationResultStore:
                     name TEXT NOT NULL,
                     passed INTEGER NOT NULL,
                     answer TEXT NOT NULL,
+                    was_fallback INTEGER NOT NULL DEFAULT 0,
                     citation_count INTEGER NOT NULL,
                     checks_json TEXT NOT NULL,
                     failures_json TEXT NOT NULL,
@@ -73,6 +75,8 @@ class SQLiteEvaluationResultStore:
                 )
                 """
             )
+
+            self._ensure_case_result_columns(cursor)
 
             connection.commit()
 
@@ -160,6 +164,7 @@ class SQLiteEvaluationResultStore:
                     name,
                     passed,
                     answer,
+                    was_fallback,
                     citation_count,
                     checks_json,
                     failures_json,
@@ -199,19 +204,21 @@ class SQLiteEvaluationResultStore:
                 name,
                 passed,
                 answer,
+                was_fallback,
                 citation_count,
                 checks_json,
                 failures_json,
                 latency_ms,
                 document_id
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 run_id,
                 result.name,
                 1 if result.passed else 0,
                 result.answer,
+                1 if result.was_fallback else 0,
                 result.citation_count,
                 json.dumps(result.checks),
                 json.dumps(result.failures),
@@ -239,12 +246,39 @@ class SQLiteEvaluationResultStore:
             name=str(row[1]),
             passed=bool(row[2]),
             answer=str(row[3]),
-            citation_count=int(row[4]),
-            checks=json.loads(str(row[5])),
-            failures=json.loads(str(row[6])),
-            latency_ms=float(row[7]),
-            document_id=None if row[8] is None else str(row[8]),
+            was_fallback=bool(row[4]),
+            citation_count=int(row[5]),
+            checks=json.loads(str(row[6])),
+            failures=json.loads(str(row[7])),
+            latency_ms=float(row[8]),
+            document_id=None if row[9] is None else str(row[9]),
         )
+
+    def _ensure_case_result_columns(self, cursor: sqlite3.Cursor) -> None:
+        existing_columns = self._get_columns(
+            cursor=cursor,
+            table_name="evaluation_case_results",
+        )
+
+        if "was_fallback" not in existing_columns:
+            cursor.execute(
+                """
+                ALTER TABLE evaluation_case_results
+                ADD COLUMN was_fallback INTEGER NOT NULL DEFAULT 0
+                """
+            )
+
+    def _get_columns(
+        self,
+        cursor: sqlite3.Cursor,
+        table_name: str,
+    ) -> set[str]:
+        cursor.execute(f"PRAGMA table_info({table_name})")
+
+        return {
+            str(row[1])
+            for row in cursor.fetchall()
+        }
 
     def _now(self) -> str:
         return datetime.now(timezone.utc).isoformat()
