@@ -43,6 +43,8 @@ from models.document_qa import (
     DocumentQueryLogListResponse,
     DocumentQueryLogResponse,
     DocumentQueryRetrievedSourceLogResponse,
+    KnowledgeGapListResponse,
+    KnowledgeGapResponse,
 )
 
 from services.document_answering_service import DocumentAnsweringService
@@ -608,29 +610,14 @@ async def ask_document_question(
 
     latency_ms = (time.perf_counter() - start_time) * 1000
 
-    query_log = document_query_log_store.record_query(
+    document_query_log_store.record_query(
         document_id=request.document_id,
         question=request.question,
         answer=response.answer,
         citation_count=len(response.citations),
+        was_fallback=response.was_fallback,
         latency_ms=latency_ms,
-        was_fallback=len(response.citations) == 0,
-    )
-
-    document_query_log_store.record_retrieved_sources(
-        query_id=query_log.query_id,
-        sources=[
-            {
-                "chunk_id": citation.chunk_id,
-                "filename": citation.filename,
-                "snippet": citation.snippet,
-                "page_number": citation.page_number,
-                "vector_score": citation.vector_score,
-                "keyword_score": citation.keyword_score,
-                "hybrid_score": citation.hybrid_score,
-            }
-            for citation in response.citations
-        ],
+        retrieved_sources=response.citations,
     )
 
     return response
@@ -784,12 +771,12 @@ async def list_document_query_logs(
     document_query_log_store: DocumentQueryLogStoreDependency,
     limit: int = Query(default=50, ge=1, le=100),
 ) -> DocumentQueryLogListResponse:
-    logs = document_query_log_store.list_recent(limit=limit)
+    logs = document_query_log_store.get_recent_logs(limit=limit)
 
     return DocumentQueryLogListResponse(
         logs=[
             DocumentQueryLogResponse(
-                query_id=log.query_id,
+                query_id=log.query_log_id,
                 document_id=log.document_id,
                 question=log.question,
                 answer=log.answer,
@@ -800,20 +787,44 @@ async def list_document_query_logs(
                 retrieved_sources=[
                     DocumentQueryRetrievedSourceLogResponse(
                         source_id=source.source_id,
-                        query_id=source.query_id,
+                        query_id=source.query_log_id,
                         chunk_id=source.chunk_id,
-                        filename=source.filename,
+                        filename=source.filename or "",
                         snippet=source.snippet,
                         page_number=source.page_number,
                         vector_score=source.vector_score,
                         keyword_score=source.keyword_score,
                         hybrid_score=source.hybrid_score,
                     )
-                    for source in document_query_log_store.list_retrieved_sources_for_query(
-                        log.query_id
-                    )
+                    for source in log.retrieved_sources
                 ],
             )
             for log in logs
+        ]
+    )
+
+@app.get(
+    "/admin/knowledge-gaps",
+    response_model=KnowledgeGapListResponse,
+    dependencies=[Depends(require_api_key)],
+)
+async def list_knowledge_gaps(
+    document_query_log_store: DocumentQueryLogStoreDependency,
+    limit: int = Query(default=50, ge=1, le=100),
+) -> KnowledgeGapListResponse:
+    fallback_logs = document_query_log_store.get_fallback_logs(limit=limit)
+
+    return KnowledgeGapListResponse(
+        gaps=[
+            KnowledgeGapResponse(
+                query_id=log.query_log_id,
+                document_id=log.document_id,
+                question=log.question,
+                answer=log.answer,
+                citation_count=log.citation_count,
+                latency_ms=log.latency_ms,
+                created_at=log.created_at,
+            )
+            for log in fallback_logs
         ]
     )

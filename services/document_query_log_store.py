@@ -225,6 +225,56 @@ class SQLiteDocumentQueryLogStore:
             for log_row in log_rows
         ]
 
+    def get_fallback_logs(self, limit: int = 20) -> list[StoredDocumentQueryLog]:
+        with sqlite3.connect(self.db_path) as connection:
+            cursor = connection.cursor()
+
+            cursor.execute(
+                """
+                SELECT query_log_id,
+                       document_id,
+                       question,
+                       answer,
+                       citation_count,
+                       was_fallback,
+                       latency_ms,
+                       created_at
+                FROM document_query_logs
+                WHERE was_fallback = 1
+                ORDER BY created_at DESC LIMIT ?
+                """,
+                (limit,),
+            )
+
+            log_rows = cursor.fetchall()
+
+            if not log_rows:
+                return []
+
+            query_log_ids = [
+                str(row[0])
+                for row in log_rows
+            ]
+
+            source_rows = self._get_source_rows(
+                cursor=cursor,
+                query_log_ids=query_log_ids,
+            )
+
+        sources_by_query_log_id: dict[str, list[StoredRetrievedSource]] = {}
+
+        for source_row in source_rows:
+            source = self._row_to_retrieved_source(source_row)
+            sources_by_query_log_id.setdefault(source.query_log_id, []).append(source)
+
+        return [
+            self._row_to_query_log(
+                row=log_row,
+                retrieved_sources=sources_by_query_log_id.get(str(log_row[0]), []),
+            )
+            for log_row in log_rows
+        ]
+
     def clear(self) -> None:
         with sqlite3.connect(self.db_path) as connection:
             cursor = connection.cursor()

@@ -64,13 +64,16 @@ The current implementation is still a learning/portfolio backend, not a fully pr
 
 ### Document Q&A
 
-- Upload `.txt` documents.
-- Create ingestion jobs.
+- Upload `.txt`, `.md`, and `.pdf` documents.
+- Create ingestion jobs and inspect ingestion status.
 - Process ingestion in FastAPI background tasks.
-- Store documents and chunks in SQLite.
+- Extract PDF text with page-aware citation metadata.
+- Store documents, chunks, page metadata, and embeddings in SQLite.
 - Generate local embeddings with `sentence-transformers`.
 - Retrieve relevant chunks using hybrid vector and keyword scoring.
-- Return grounded answers with citation snippets and retrieval scores.
+- Return grounded answers with citation snippets, filenames, page numbers, and retrieval scores.
+- Return explicit fallback responses when retrieved context does not support an answer.
+- Log document questions, final answers, retrieved sources, latency, citation count, and fallback status.
 
 ### Tool Assistant
 
@@ -82,9 +85,12 @@ The current implementation is still a learning/portfolio backend, not a fully pr
 
 ### Evaluation and Observability
 
-- Document Q&A evaluation script.
+- Document Q&A evaluation script with answerable and unanswerable cases.
 - Extraction evaluation script.
 - Stored latest document Q&A evaluation run.
+- Explicit fallback accuracy checks in document Q&A evaluation.
+- Admin query-log endpoint with nested retrieved-source debug data.
+- Admin knowledge-gap endpoint for fallback questions.
 - Usage records for document embedding and document answering.
 - Basic cost estimation.
 - Request logging middleware with `X-Request-ID` support.

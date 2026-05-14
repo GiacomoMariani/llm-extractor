@@ -71,3 +71,35 @@ def test_record_query_stores_retrieved_source_debug_data(tmp_path):
     assert retrieved_source.keyword_score == 0.6
     assert retrieved_source.hybrid_score == 0.65
     assert retrieved_source.rank == 1
+
+def test_get_fallback_logs_returns_only_fallback_queries(tmp_path):
+    store = SQLiteDocumentQueryLogStore(
+        db_path=str(tmp_path / "test.db"),
+    )
+
+    store.record_query(
+        document_id="doc-1",
+        question="What backend framework is used?",
+        answer="FastAPI is used.",
+        citation_count=1,
+        was_fallback=False,
+        latency_ms=5.0,
+        retrieved_sources=[],
+    )
+
+    store.record_query(
+        document_id="doc-2",
+        question="What is the refund policy?",
+        answer="I could not find the answer in the provided context.",
+        citation_count=0,
+        was_fallback=True,
+        latency_ms=7.0,
+        retrieved_sources=[],
+    )
+
+    gaps = store.get_fallback_logs(limit=10)
+
+    assert len(gaps) == 1
+    assert gaps[0].document_id == "doc-2"
+    assert gaps[0].question == "What is the refund policy?"
+    assert gaps[0].was_fallback is True

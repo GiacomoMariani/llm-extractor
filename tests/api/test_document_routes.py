@@ -741,3 +741,55 @@ def test_list_document_query_logs_returns_recent_document_questions():
     assert 0.0 <= source["vector_score"] <= 1.0
     assert 0.0 <= source["keyword_score"] <= 1.0
     assert 0.0 <= source["hybrid_score"] <= 1.0
+
+def test_list_knowledge_gaps_returns_fallback_document_questions():
+    import main
+
+    main.sqlite_document_query_log_store.record_query(
+        document_id="doc-1",
+        question="What backend framework is used?",
+        answer="FastAPI is used.",
+        citation_count=1,
+        was_fallback=False,
+        latency_ms=5.0,
+        retrieved_sources=[],
+    )
+
+    main.sqlite_document_query_log_store.record_query(
+        document_id="doc-2",
+        question="What is the refund policy?",
+        answer="I could not find the answer in the provided context.",
+        citation_count=0,
+        was_fallback=True,
+        latency_ms=7.0,
+        retrieved_sources=[],
+    )
+
+    response = client.get(
+        "/admin/knowledge-gaps",
+        headers=AUTH_HEADERS,
+    )
+
+    assert response.status_code == 200
+
+    payload = response.json()
+
+    assert len(payload["gaps"]) == 1
+
+    gap = payload["gaps"][0]
+
+    assert gap["query_id"].startswith("query-")
+    assert gap["document_id"] == "doc-2"
+    assert gap["question"] == "What is the refund policy?"
+    assert gap["answer"] == "I could not find the answer in the provided context."
+    assert gap["citation_count"] == 0
+    assert gap["latency_ms"] == 7.0
+    assert gap["created_at"]
+
+def test_list_knowledge_gaps_requires_api_key():
+    response = client.get("/admin/knowledge-gaps")
+
+    assert response.status_code == 401
+    assert response.json() == {
+        "detail": "Invalid or missing API key."
+    }

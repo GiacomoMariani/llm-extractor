@@ -42,5 +42,71 @@
     "expected_was_fallback": true,
     "min_citations": 0,
     "require_retrieval_scores": false
+  },
+  {
+    "name": "testing_tool_question",
+    "document_filename": "backend_guide.txt",
+    "document_text": "FastAPI is the backend framework used in this project. Pytest is used for automated testing. Docker packages the application for deployment.",
+    "question": "What tool is used for automated testing?",
+    "expected_answer_contains": ["Pytest"],
+    "expected_citation_contains": ["Pytest"],
+    "expected_was_fallback": false,
+    "min_citations": 1,
+    "require_retrieval_scores": true
+  },
+  {
+    "name": "deployment_packaging_question",
+    "document_filename": "backend_guide.txt",
+    "document_text": "FastAPI is the backend framework used in this project. Pytest is used for automated testing. Docker packages the application for deployment.",
+    "question": "What packages the application for deployment?",
+    "expected_answer_contains": ["Docker"],
+    "expected_citation_contains": ["Docker"],
+    "expected_was_fallback": false,
+    "min_citations": 1,
+    "require_retrieval_scores": true
+  },
+  {
+    "name": "job_status_endpoint_question",
+    "document_filename": "production_rag_guide.txt",
+    "document_text": "Background ingestion jobs let uploads return quickly. The job status endpoint tells clients whether ingestion is queued, processing, completed, or failed.",
+    "question": "What does the job status endpoint tell clients?",
+    "expected_answer_contains": ["queued", "processing", "completed", "failed"],
+    "expected_citation_contains": ["job status endpoint"],
+    "expected_was_fallback": false,
+    "min_citations": 1,
+    "require_retrieval_scores": true
+  },
+  {
+    "name": "citation_debug_scores_question",
+    "document_filename": "retrieval_guide.txt",
+    "document_text": "Hybrid retrieval combines vector similarity with keyword search. Citations show vector, keyword, and hybrid scores for debugging.",
+    "question": "What scores do citations show for debugging?",
+    "expected_answer_contains": ["vector", "keyword", "hybrid"],
+    "expected_citation_contains": ["Citations show"],
+    "expected_was_fallback": false,
+    "min_citations": 1,
+    "require_retrieval_scores": true
+  },
+  {
+    "name": "unsupported_pricing_question",
+    "document_filename": "backend_guide.txt",
+    "document_text": "FastAPI is the backend framework used in this project. Pytest is used for automated testing. Docker packages the application for deployment.",
+    "question": "What is the monthly pricing plan?",
+    "expected_answer_contains": ["could not find"],
+    "expected_citation_contains": [],
+    "expected_was_fallback": true,
+    "min_citations": 0,
+    "require_retrieval_scores": false
+  },
+  {
+    "name": "unsupported_hr_policy_question",
+    "document_filename": "retrieval_guide.txt",
+    "document_text": "Hybrid retrieval combines vector similarity with keyword search. Citations show vector, keyword, and hybrid scores for debugging.",
+    "question": "How many vacation days do employees get?",
+    "expected_answer_contains": ["could not find"],
+    "expected_citation_contains": [],
+    "expected_was_fallback": true,
+    "min_citations": 0,
+    "require_retrieval_scores": false
   }
 ]
