@@ -8,6 +8,7 @@ class DocumentQAEvalCase(BaseModel):
     question: str = Field(min_length=1)
     expected_answer_contains: list[str] = Field(default_factory=list)
     expected_citation_contains: list[str] = Field(default_factory=list)
+    expected_was_fallback: bool | None = None
     min_citations: int = Field(default=1, ge=0)
     require_retrieval_scores: bool = True
 
@@ -16,6 +17,7 @@ class DocumentQAEvalCaseResult(BaseModel):
     name: str
     passed: bool
     answer: str
+    was_fallback: bool = False
     citation_count: int
     checks: list[str]
     failures: list[str]
@@ -35,6 +37,7 @@ class DocumentQAEvalStoredCaseResultResponse(BaseModel):
     name: str
     passed: bool
     answer: str
+    was_fallback: bool = False
     citation_count: int
     checks: list[str]
     failures: list[str]

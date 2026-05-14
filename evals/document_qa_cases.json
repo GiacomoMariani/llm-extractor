@@ -6,6 +6,7 @@
     "question": "What backend framework is used?",
     "expected_answer_contains": ["FastAPI"],
     "expected_citation_contains": ["FastAPI"],
+    "expected_was_fallback": false,
     "min_citations": 1,
     "require_retrieval_scores": true
   },
@@ -16,6 +17,7 @@
     "question": "What lets uploads return quickly?",
     "expected_answer_contains": ["Background ingestion jobs"],
     "expected_citation_contains": ["Background ingestion jobs"],
+    "expected_was_fallback": false,
     "min_citations": 1,
     "require_retrieval_scores": true
   },
@@ -26,7 +28,19 @@
     "question": "What does hybrid retrieval combine?",
     "expected_answer_contains": ["vector similarity", "keyword search"],
     "expected_citation_contains": ["Hybrid retrieval"],
+    "expected_was_fallback": false,
     "min_citations": 1,
     "require_retrieval_scores": true
+  },
+  {
+    "name": "unsupported_refund_policy_question",
+    "document_filename": "backend_guide.txt",
+    "document_text": "FastAPI is the backend framework used in this project. Pytest is used for automated testing. Docker packages the application for deployment.",
+    "question": "What is the refund policy?",
+    "expected_answer_contains": ["could not find"],
+    "expected_citation_contains": [],
+    "expected_was_fallback": true,
+    "min_citations": 0,
+    "require_retrieval_scores": false
   }
 ]

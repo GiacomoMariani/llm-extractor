@@ -81,7 +81,8 @@ class DocumentAnsweringService:
 
         return DocumentAskResponse(
             answer=answer_response.answer,
-            citations=citations,
+            citations=[] if answer_response.was_fallback else citations,
+            was_fallback=answer_response.was_fallback,
         )
 
     def _snippet(self, text: str, limit: int = 160) -> str:

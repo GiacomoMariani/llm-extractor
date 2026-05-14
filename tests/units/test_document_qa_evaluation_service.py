@@ -21,16 +21,17 @@ class SuccessfulAnsweringService:
         return DocumentAskResponse(
             answer="FastAPI is the backend framework used in this project.",
             citations=[
-                {
-                    "chunk_id": f"{document_id}-chunk-1",
-                    "filename": "guide.txt",
-                    "snippet": "FastAPI is the backend framework used in this project.",
-                    "page_number": None,
-                    "vector_score": 1.0,
-                    "keyword_score": 1.0,
-                    "hybrid_score": 1.0,
-                }
+                Citation(
+                    chunk_id="doc-123-chunk-1",
+                    filename="eval_document.txt",
+                    page_number=None,
+                    snippet="FastAPI is the backend framework used in this project.",
+                    vector_score=1.0,
+                    keyword_score=1.0,
+                    hybrid_score=1.0,
+                )
             ],
+            was_fallback=False,
         )
 
 
@@ -39,6 +40,7 @@ class BadAnsweringService:
         return DocumentAskResponse(
             answer="I could not find the answer in the provided context.",
             citations=[],
+            was_fallback=True,
         )
 
 
@@ -55,6 +57,7 @@ async def test_document_qa_eval_case_passes_when_answer_and_citation_match():
         question="What backend framework is used?",
         expected_answer_contains=["FastAPI"],
         expected_citation_contains=["FastAPI"],
+        expected_was_fallback=False,
         min_citations=1,
     )
 
@@ -63,6 +66,7 @@ async def test_document_qa_eval_case_passes_when_answer_and_citation_match():
     assert result.passed is True
     assert result.name == "backend_framework_question"
     assert result.document_id == "doc-123"
+    assert result.was_fallback is False
     assert result.citation_count == 1
     assert result.failures == []
     assert result.latency_ms >= 0
@@ -81,15 +85,44 @@ async def test_document_qa_eval_case_fails_when_answer_and_citation_do_not_match
         question="What backend framework is used?",
         expected_answer_contains=["FastAPI"],
         expected_citation_contains=["FastAPI"],
+        expected_was_fallback=False,
         min_citations=1,
     )
 
     result = await service.evaluate_case(case)
 
     assert result.passed is False
+    assert result.was_fallback is True
     assert "Answer does not contain 'FastAPI'." in result.failures
+    assert "Expected fallback to be False, got True." in result.failures
     assert "Expected at least 1 citation(s), got 0." in result.failures
     assert "No citation contains 'FastAPI'." in result.failures
+
+
+@pytest.mark.asyncio
+async def test_document_qa_eval_case_passes_when_expected_fallback_happens():
+    service = DocumentQAEvaluationService(
+        ingestion_service=SuccessfulIngestionService(),
+        answering_service=BadAnsweringService(),
+    )
+
+    case = DocumentQAEvalCase(
+        name="unsupported_refund_policy_question",
+        document_text="FastAPI is the backend framework used in this project.",
+        question="What is the refund policy?",
+        expected_answer_contains=["could not find"],
+        expected_was_fallback=True,
+        min_citations=0,
+        require_retrieval_scores=False,
+    )
+
+    result = await service.evaluate_case(case)
+
+    assert result.passed is True
+    assert result.was_fallback is True
+    assert result.citation_count == 0
+    assert "Fallback matched expected value True." in result.checks
+    assert result.failures == []
 
 
 @pytest.mark.asyncio
@@ -106,6 +139,7 @@ async def test_document_qa_eval_summary_counts_passed_and_failed_cases():
             question="What backend framework is used?",
             expected_answer_contains=["FastAPI"],
             expected_citation_contains=["FastAPI"],
+            expected_was_fallback=False,
             min_citations=1,
         ),
         DocumentQAEvalCase(
@@ -114,6 +148,7 @@ async def test_document_qa_eval_summary_counts_passed_and_failed_cases():
             question="What backend framework is used?",
             expected_answer_contains=["Django"],
             expected_citation_contains=["Django"],
+            expected_was_fallback=False,
             min_citations=1,
         ),
     ]

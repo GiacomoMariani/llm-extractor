@@ -28,7 +28,5 @@ async def test_rule_based_answerer_returns_fallback_when_no_match():
         context="This project uses Python and FastAPI.",
     )
 
-    assert result.answer in {
-        "This project uses Python and FastAPI.",
-        "I could not find the answer in the provided context.",
-    }
+    assert result.answer == "I could not find the answer in the provided context."
+    assert result.was_fallback is True

@@ -8,3 +8,4 @@ class AnswerRequest(BaseModel):
 
 class AnswerResponse(BaseModel):
     answer: str
+    was_fallback: bool = False

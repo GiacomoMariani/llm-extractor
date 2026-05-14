@@ -47,7 +47,8 @@ class DocumentDeleteResponse(BaseModel):
 class DocumentAskResponse(BaseModel):
     answer: str
     citations: list[Citation]
-
+    was_fallback: bool = False
+    
 class DocumentReindexResponse(BaseModel):
     job_id: str
     document_id: str

@@ -53,6 +53,7 @@ class DocumentQAEvaluationService:
         failures: list[str] = []
         document_id: str | None = None
         answer = ""
+        was_fallback = False
         citation_count = 0
 
         try:
@@ -69,12 +70,20 @@ class DocumentQAEvaluationService:
             )
 
             answer = answer_response.answer
+            was_fallback = answer_response.was_fallback
             citations = answer_response.citations
             citation_count = len(citations)
 
             self._check_answer_contains(
                 case=case,
                 answer=answer,
+                checks=checks,
+                failures=failures,
+            )
+
+            self._check_expected_fallback(
+                case=case,
+                was_fallback=was_fallback,
                 checks=checks,
                 failures=failures,
             )
@@ -108,6 +117,7 @@ class DocumentQAEvaluationService:
             name=case.name,
             passed=not failures,
             answer=answer,
+            was_fallback=was_fallback,
             citation_count=citation_count,
             checks=checks,
             failures=failures,
@@ -129,6 +139,23 @@ class DocumentQAEvaluationService:
                 checks.append(f"Answer contains '{expected_text}'.")
             else:
                 failures.append(f"Answer does not contain '{expected_text}'.")
+
+    def _check_expected_fallback(
+        self,
+        case: DocumentQAEvalCase,
+        was_fallback: bool,
+        checks: list[str],
+        failures: list[str],
+    ) -> None:
+        if case.expected_was_fallback is None:
+            return
+
+        if was_fallback is case.expected_was_fallback:
+            checks.append(f"Fallback matched expected value {case.expected_was_fallback}.")
+        else:
+            failures.append(
+                f"Expected fallback to be {case.expected_was_fallback}, got {was_fallback}."
+            )
 
     def _check_citation_count(
         self,
