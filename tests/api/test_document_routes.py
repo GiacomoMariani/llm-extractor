@@ -728,3 +728,16 @@ def test_list_document_query_logs_returns_recent_document_questions():
     assert log["latency_ms"] >= 0
     assert log["was_fallback"] is False
     assert log["created_at"]
+    assert len(log["retrieved_sources"]) >= 1
+
+    source = log["retrieved_sources"][0]
+
+    assert source["source_id"].startswith("source-")
+    assert source["query_id"] == log["query_id"]
+    assert source["chunk_id"].startswith(f"{document_id}-chunk-")
+    assert source["filename"] == "guide.txt"
+    assert source["snippet"]
+    assert source["page_number"] is None
+    assert 0.0 <= source["vector_score"] <= 1.0
+    assert 0.0 <= source["keyword_score"] <= 1.0
+    assert 0.0 <= source["hybrid_score"] <= 1.0

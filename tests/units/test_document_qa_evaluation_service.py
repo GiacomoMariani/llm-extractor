@@ -21,13 +21,15 @@ class SuccessfulAnsweringService:
         return DocumentAskResponse(
             answer="FastAPI is the backend framework used in this project.",
             citations=[
-                Citation(
-                    chunk_id="doc-123-chunk-1",
-                    snippet="FastAPI is the backend framework used in this project.",
-                    vector_score=1.0,
-                    keyword_score=1.0,
-                    hybrid_score=1.0,
-                )
+                {
+                    "chunk_id": f"{document_id}-chunk-1",
+                    "filename": "guide.txt",
+                    "snippet": "FastAPI is the backend framework used in this project.",
+                    "page_number": None,
+                    "vector_score": 1.0,
+                    "keyword_score": 1.0,
+                    "hybrid_score": 1.0,
+                }
             ],
         )
 

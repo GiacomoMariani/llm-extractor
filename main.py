@@ -42,6 +42,7 @@ from models.document_qa import (
     DocumentReindexResponse,
     DocumentQueryLogListResponse,
     DocumentQueryLogResponse,
+    DocumentQueryRetrievedSourceLogResponse,
 )
 
 from services.document_answering_service import DocumentAnsweringService
@@ -607,13 +608,29 @@ async def ask_document_question(
 
     latency_ms = (time.perf_counter() - start_time) * 1000
 
-    document_query_log_store.record_query(
+    query_log = document_query_log_store.record_query(
         document_id=request.document_id,
         question=request.question,
         answer=response.answer,
         citation_count=len(response.citations),
         latency_ms=latency_ms,
         was_fallback=len(response.citations) == 0,
+    )
+
+    document_query_log_store.record_retrieved_sources(
+        query_id=query_log.query_id,
+        sources=[
+            {
+                "chunk_id": citation.chunk_id,
+                "filename": citation.filename,
+                "snippet": citation.snippet,
+                "page_number": citation.page_number,
+                "vector_score": citation.vector_score,
+                "keyword_score": citation.keyword_score,
+                "hybrid_score": citation.hybrid_score,
+            }
+            for citation in response.citations
+        ],
     )
 
     return response
@@ -779,6 +796,22 @@ async def list_document_query_logs(
                 latency_ms=log.latency_ms,
                 was_fallback=log.was_fallback,
                 created_at=log.created_at,
+                retrieved_sources=[
+                    DocumentQueryRetrievedSourceLogResponse(
+                        source_id=source.source_id,
+                        query_id=source.query_id,
+                        chunk_id=source.chunk_id,
+                        filename=source.filename,
+                        snippet=source.snippet,
+                        page_number=source.page_number,
+                        vector_score=source.vector_score,
+                        keyword_score=source.keyword_score,
+                        hybrid_score=source.hybrid_score,
+                    )
+                    for source in document_query_log_store.list_retrieved_sources_for_query(
+                        log.query_id
+                    )
+                ],
             )
             for log in logs
         ]

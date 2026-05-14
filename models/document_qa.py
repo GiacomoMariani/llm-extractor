@@ -63,7 +63,18 @@ class DocumentQueryLogResponse(BaseModel):
     latency_ms: float
     was_fallback: bool
     created_at: str
-
+    retrieved_sources: list[DocumentQueryRetrievedSourceLogResponse] = []
 
 class DocumentQueryLogListResponse(BaseModel):
     logs: list[DocumentQueryLogResponse]
+
+class DocumentQueryRetrievedSourceLogResponse(BaseModel):
+    source_id: str
+    query_id: str
+    chunk_id: str
+    filename: str
+    snippet: str
+    page_number: int | None = None
+    vector_score: float
+    keyword_score: float
+    hybrid_score: float
