@@ -1,6 +1,7 @@
 import os
 import json
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
@@ -19,73 +20,47 @@ class SQLiteDocumentStore:
 
             cursor.execute(
                 """
-                CREATE TABLE IF NOT EXISTS documents
-                (
-                    document_id
-                    TEXT
-                    PRIMARY
-                    KEY,
-                    filename
-                    TEXT
-                    NOT
-                    NULL,
-                    original_text
-                    TEXT
-                    NOT
-                    NULL
+                CREATE TABLE IF NOT EXISTS documents (
+                    document_id TEXT PRIMARY KEY,
+                    filename TEXT NOT NULL,
+                    original_text TEXT NOT NULL,
+                    file_type TEXT NOT NULL DEFAULT 'unknown',
+                    upload_date TEXT NOT NULL DEFAULT '',
+                    status TEXT NOT NULL DEFAULT 'indexed',
+                    page_count INTEGER
                 )
                 """
             )
 
             cursor.execute(
                 """
-                CREATE TABLE IF NOT EXISTS chunks
-                (
-                    chunk_id
-                    TEXT
-                    PRIMARY
-                    KEY,
-                    document_id
-                    TEXT
-                    NOT
-                    NULL,
-                    text
-                    TEXT
-                    NOT
-                    NULL,
-                    embedding
-                    TEXT
-                    NOT
-                    NULL,
-                    page_number
-                    INTEGER,
-                    FOREIGN
-                    KEY
-                (
-                    document_id
-                ) REFERENCES documents
-                (
-                    document_id
+                CREATE TABLE IF NOT EXISTS chunks (
+                    chunk_id TEXT PRIMARY KEY,
+                    document_id TEXT NOT NULL,
+                    text TEXT NOT NULL,
+                    embedding TEXT NOT NULL,
+                    page_number INTEGER,
+                    FOREIGN KEY (document_id) REFERENCES documents(document_id)
                 )
-                    )
                 """
             )
 
-            cursor.execute("PRAGMA table_info(chunks)")
-            chunk_columns = {row[1] for row in cursor.fetchall()}
-
-            if "page_number" not in chunk_columns:
-                cursor.execute("ALTER TABLE chunks ADD COLUMN page_number INTEGER")
+            self._ensure_document_columns(cursor)
+            self._ensure_chunk_columns(cursor)
 
             connection.commit()
 
     def save_document(
-        self,
-        filename: str,
-        text: str,
-        chunk_payloads: list[dict[str, object]],
+            self,
+            filename: str,
+            text: str,
+            chunk_payloads: list[dict[str, object]],
     ) -> StoredDocument:
         document_id = f"doc-{uuid4().hex[:12]}"
+        file_type = self._infer_file_type(filename)
+        upload_date = self._now()
+        status = "indexed"
+        page_count = self._infer_page_count(chunk_payloads)
 
         chunks: list[StoredChunk] = []
 
@@ -94,20 +69,39 @@ class SQLiteDocumentStore:
 
             cursor.execute(
                 """
-                INSERT INTO documents (document_id, filename, original_text)
-                VALUES (?, ?, ?)
+                INSERT INTO documents (document_id,
+                                       filename,
+                                       original_text,
+                                       file_type,
+                                       upload_date,
+                                       status,
+                                       page_count)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
-                (document_id, filename, text),
+                (
+                    document_id,
+                    filename,
+                    text,
+                    file_type,
+                    upload_date,
+                    status,
+                    page_count,
+                ),
             )
 
             for index, chunk_payload in enumerate(chunk_payloads, start=1):
                 chunk_id = f"{document_id}-chunk-{index}"
-                chunk_text = chunk_payload["text"]
+                chunk_text = str(chunk_payload["text"])
                 chunk_embedding = chunk_payload["embedding"]
+                page_number = chunk_payload.get("page_number")
 
                 cursor.execute(
                     """
-                    INSERT INTO chunks (chunk_id, document_id, text, embedding, page_number)
+                    INSERT INTO chunks (chunk_id,
+                                        document_id,
+                                        text,
+                                        embedding,
+                                        page_number)
                     VALUES (?, ?, ?, ?, ?)
                     """,
                     (
@@ -115,7 +109,7 @@ class SQLiteDocumentStore:
                         document_id,
                         chunk_text,
                         json.dumps(chunk_embedding),
-                        chunk_payload.get("page_number"),
+                        page_number,
                     ),
                 )
 
@@ -124,7 +118,7 @@ class SQLiteDocumentStore:
                         chunk_id=chunk_id,
                         text=chunk_text,
                         embedding=chunk_embedding,
-                        page_number=chunk_payload.get("page_number"),
+                        page_number=page_number,
                     )
                 )
 
@@ -134,6 +128,10 @@ class SQLiteDocumentStore:
             document_id=document_id,
             filename=filename,
             original_text=text,
+            file_type=file_type,
+            upload_date=upload_date,
+            status=status,
+            page_count=page_count,
             chunks=chunks,
         )
 
@@ -143,7 +141,13 @@ class SQLiteDocumentStore:
 
             cursor.execute(
                 """
-                SELECT document_id, filename, original_text
+                SELECT document_id,
+                       filename,
+                       original_text,
+                       file_type,
+                       upload_date,
+                       status,
+                       page_count
                 FROM documents
                 WHERE document_id = ?
                 """,
@@ -179,36 +183,12 @@ class SQLiteDocumentStore:
             document_id=document_row[0],
             filename=document_row[1],
             original_text=document_row[2],
+            file_type=document_row[3] or "unknown",
+            upload_date=document_row[4] or self._now(),
+            status=document_row[5] or "indexed",
+            page_count=document_row[6],
             chunks=chunks,
         )
-
-    def list_documents(self) -> list[StoredDocumentSummary]:
-        with sqlite3.connect(self.db_path) as connection:
-            cursor = connection.cursor()
-
-            cursor.execute(
-                """
-                SELECT documents.document_id,
-                       documents.filename,
-                       COUNT(chunks.chunk_id) AS chunk_count
-                FROM documents
-                         LEFT JOIN chunks
-                                   ON chunks.document_id = documents.document_id
-                GROUP BY documents.document_id, documents.filename
-                ORDER BY documents.rowid
-                """
-            )
-
-            rows = cursor.fetchall()
-
-        return [
-            StoredDocumentSummary(
-                document_id=document_id,
-                filename=filename,
-                chunk_count=chunk_count,
-            )
-            for document_id, filename, chunk_count in rows
-        ]
 
     def delete_document(self, document_id: str) -> bool:
         with sqlite3.connect(self.db_path) as connection:
@@ -241,13 +221,18 @@ class SQLiteDocumentStore:
             chunk_payloads: list[dict[str, object]],
     ) -> StoredDocument | None:
         chunks: list[StoredChunk] = []
+        page_count = self._infer_page_count(chunk_payloads)
 
         with sqlite3.connect(self.db_path) as connection:
             cursor = connection.cursor()
 
             cursor.execute(
                 """
-                SELECT filename, original_text
+                SELECT filename,
+                       original_text,
+                       file_type,
+                       upload_date,
+                       status
                 FROM documents
                 WHERE document_id = ?
                 """,
@@ -261,6 +246,9 @@ class SQLiteDocumentStore:
 
             filename = document_row[0]
             original_text = document_row[1]
+            file_type = document_row[2] or self._infer_file_type(filename)
+            upload_date = document_row[3] or self._now()
+            status = "indexed"
 
             cursor.execute(
                 """
@@ -271,9 +259,19 @@ class SQLiteDocumentStore:
                 (document_id,),
             )
 
+            cursor.execute(
+                """
+                UPDATE documents
+                SET status     = ?,
+                    page_count = ?
+                WHERE document_id = ?
+                """,
+                (status, page_count, document_id),
+            )
+
             for index, chunk_payload in enumerate(chunk_payloads, start=1):
                 chunk_id = f"{document_id}-chunk-{index}"
-                chunk_text = chunk_payload["text"]
+                chunk_text = str(chunk_payload["text"])
                 chunk_embedding = chunk_payload["embedding"]
                 page_number = chunk_payload.get("page_number")
 
@@ -310,8 +308,61 @@ class SQLiteDocumentStore:
             document_id=document_id,
             filename=filename,
             original_text=original_text,
+            file_type=file_type,
+            upload_date=upload_date,
+            status=status,
+            page_count=page_count,
             chunks=chunks,
         )
+
+    def list_documents(self) -> list[StoredDocumentSummary]:
+        with sqlite3.connect(self.db_path) as connection:
+            cursor = connection.cursor()
+
+            cursor.execute(
+                """
+                SELECT documents.document_id,
+                       documents.filename,
+                       documents.file_type,
+                       documents.upload_date,
+                       documents.status,
+                       documents.page_count,
+                       COUNT(chunks.chunk_id) AS chunk_count
+                FROM documents
+                         LEFT JOIN chunks
+                                   ON chunks.document_id = documents.document_id
+                GROUP BY documents.document_id,
+                         documents.filename,
+                         documents.file_type,
+                         documents.upload_date,
+                         documents.status,
+                         documents.page_count
+                ORDER BY documents.rowid
+                """
+            )
+
+            rows = cursor.fetchall()
+
+        return [
+            StoredDocumentSummary(
+                document_id=document_id,
+                filename=filename,
+                file_type=file_type or "unknown",
+                upload_date=upload_date or self._now(),
+                status=status or "indexed",
+                page_count=page_count,
+                chunk_count=chunk_count,
+            )
+            for (
+                document_id,
+                filename,
+                file_type,
+                upload_date,
+                status,
+                page_count,
+                chunk_count,
+            ) in rows
+        ]
 
     def clear(self) -> None:
         with sqlite3.connect(self.db_path) as connection:
@@ -319,6 +370,91 @@ class SQLiteDocumentStore:
             cursor.execute("DELETE FROM chunks")
             cursor.execute("DELETE FROM documents")
             connection.commit()
+
+    def _ensure_document_columns(self, cursor: sqlite3.Cursor) -> None:
+        existing_columns = self._get_columns(
+            cursor=cursor,
+            table_name="documents",
+        )
+
+        if "file_type" not in existing_columns:
+            cursor.execute(
+                """
+                ALTER TABLE documents
+                    ADD COLUMN file_type TEXT NOT NULL DEFAULT 'unknown'
+                """
+            )
+
+        if "upload_date" not in existing_columns:
+            cursor.execute(
+                """
+                ALTER TABLE documents
+                    ADD COLUMN upload_date TEXT NOT NULL DEFAULT ''
+                """
+            )
+
+        if "status" not in existing_columns:
+            cursor.execute(
+                """
+                ALTER TABLE documents
+                    ADD COLUMN status TEXT NOT NULL DEFAULT 'indexed'
+                """
+            )
+
+        if "page_count" not in existing_columns:
+            cursor.execute(
+                """
+                ALTER TABLE documents
+                    ADD COLUMN page_count INTEGER
+                """
+            )
+
+    def _ensure_chunk_columns(self, cursor: sqlite3.Cursor) -> None:
+        existing_columns = self._get_columns(
+            cursor=cursor,
+            table_name="chunks",
+        )
+
+        if "page_number" not in existing_columns:
+            cursor.execute("ALTER TABLE chunks ADD COLUMN page_number INTEGER")
+
+    def _get_columns(
+            self,
+            cursor: sqlite3.Cursor,
+            table_name: str,
+    ) -> set[str]:
+        cursor.execute(f"PRAGMA table_info({table_name})")
+
+        return {
+            str(row[1])
+            for row in cursor.fetchall()
+        }
+
+    def _infer_file_type(self, filename: str) -> str:
+        suffix = Path(filename).suffix.lower().lstrip(".")
+
+        if suffix:
+            return suffix
+
+        return "unknown"
+
+    def _infer_page_count(
+            self,
+            chunk_payloads: list[dict[str, object]],
+    ) -> int | None:
+        page_numbers = [
+            int(chunk_payload["page_number"])
+            for chunk_payload in chunk_payloads
+            if chunk_payload.get("page_number") is not None
+        ]
+
+        if not page_numbers:
+            return None
+
+        return max(page_numbers)
+
+    def _now(self) -> str:
+        return datetime.now(timezone.utc).isoformat()
 
 sqlite_document_store = SQLiteDocumentStore(
     db_path=os.getenv("APP_DB_PATH", "app.db")

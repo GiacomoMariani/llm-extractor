@@ -47,6 +47,7 @@ def test_answer_route_uses_service_override():
     assert response.status_code == 200
     assert response.json() == {
         "answer": "Fake answer",
+        "was_fallback": False,
     }
 
 

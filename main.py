@@ -503,6 +503,10 @@ async def list_documents() -> DocumentListResponse:
             DocumentSummaryResponse(
                 document_id=document.document_id,
                 filename=document.filename,
+                file_type=document.file_type,
+                upload_date=document.upload_date,
+                status=document.status,
+                page_count=document.page_count,
                 chunk_count=document.chunk_count,
             )
             for document in documents

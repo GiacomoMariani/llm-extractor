@@ -37,8 +37,11 @@ class Citation(BaseModel):
 class DocumentSummaryResponse(BaseModel):
     document_id: str
     filename: str
+    file_type: str
+    upload_date: str
+    status: str
+    page_count: int | None = None
     chunk_count: int
-
 
 class DocumentListResponse(BaseModel):
     documents: list[DocumentSummaryResponse]

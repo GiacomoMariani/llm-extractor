@@ -506,13 +506,17 @@ def test_list_documents_returns_uploaded_documents():
 
     payload = response.json()
 
-    assert payload["documents"] == [
-        {
-            "document_id": document_id,
-            "filename": "guide.txt",
-            "chunk_count": job_response.json()["chunk_count"],
-        }
-    ]
+    assert len(payload["documents"]) == 1
+
+    document = payload["documents"][0]
+
+    assert document["document_id"] == document_id
+    assert document["filename"] == "guide.txt"
+    assert document["file_type"] == "txt"
+    assert document["upload_date"]
+    assert document["status"] == "indexed"
+    assert document["page_count"] is None
+    assert document["chunk_count"] == job_response.json()["chunk_count"]
 
 def test_delete_document_requires_api_key():
     response = client.delete("/documents/doc-missing")
