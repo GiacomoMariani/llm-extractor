@@ -27,19 +27,129 @@ SAMPLE_QUESTIONS = [
 ]
 
 
+# ---------------------------------------------------------------------
+# Page configuration
+# ---------------------------------------------------------------------
+
 st.set_page_config(
     page_title="Business RAG Chatbot",
     page_icon="💬",
     layout="wide",
 )
 
-st.title("Business RAG Chatbot")
 
-st.info(
-    "Demo environment: this page is for testing only. "
-    "Do not upload confidential, personal, financial, legal, or sensitive business data."
-)
+CUSTOM_CSS = """
+<style>
+    .block-container {
+        padding-top: 1.6rem;
+        padding-bottom: 3rem;
+        max-width: 1200px;
+    }
 
+    .top-header {
+        margin-bottom: 1.1rem;
+    }
+
+    .top-header h1 {
+        font-size: 2.35rem;
+        line-height: 1.1;
+        margin-bottom: 0.4rem;
+    }
+
+    .top-header p {
+        color: #64748b;
+        font-size: 1rem;
+        max-width: 850px;
+    }
+
+    .skill-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.45rem;
+        margin-top: 0.9rem;
+        margin-bottom: 0.4rem;
+    }
+
+    .skill-chip {
+        border: 1px solid #cbd5e1;
+        background: #f8fafc;
+        color: #334155;
+        padding: 0.35rem 0.65rem;
+        border-radius: 999px;
+        font-size: 0.82rem;
+        font-weight: 600;
+    }
+
+    .chat-focus {
+        padding: 1.25rem;
+        border: 1px solid #dbeafe;
+        border-radius: 1.1rem;
+        background: linear-gradient(180deg, #eff6ff 0%, #ffffff 70%);
+        margin-bottom: 1rem;
+    }
+
+    .section-card {
+        padding: 1rem 1.1rem;
+        border: 1px solid #e5e7eb;
+        border-radius: 1rem;
+        background: #ffffff;
+        height: 100%;
+    }
+
+    .section-card h3 {
+        margin-top: 0;
+        margin-bottom: 0.35rem;
+        font-size: 1.05rem;
+    }
+
+    .section-card p {
+        color: #475569;
+        font-size: 0.92rem;
+        margin-bottom: 0;
+    }
+
+    .step-card {
+        padding: 1rem;
+        border-radius: 0.9rem;
+        border: 1px solid #e5e7eb;
+        background: #f8fafc;
+        margin-bottom: 0.75rem;
+    }
+
+    .step-number {
+        display: inline-block;
+        width: 1.7rem;
+        height: 1.7rem;
+        line-height: 1.7rem;
+        border-radius: 999px;
+        text-align: center;
+        background: #0f172a;
+        color: white;
+        font-size: 0.8rem;
+        font-weight: 700;
+        margin-right: 0.45rem;
+    }
+
+    .muted {
+        color: #64748b;
+    }
+
+    .footer {
+        margin-top: 2rem;
+        padding-top: 1rem;
+        border-top: 1px solid #e5e7eb;
+        color: #64748b;
+        font-size: 0.9rem;
+    }
+</style>
+"""
+
+st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
+
+
+# ---------------------------------------------------------------------
+# API helpers
+# ---------------------------------------------------------------------
 
 def api_request(
     method: str,
@@ -135,11 +245,37 @@ def get_logs(limit: int = 10) -> list[dict[str, Any]]:
     )["logs"]
 
 
-def submit_question(question: str) -> None:
+# ---------------------------------------------------------------------
+# State helpers
+# ---------------------------------------------------------------------
+
+if "chat" not in st.session_state:
+    st.session_state["chat"] = []
+
+if "latest_answer" not in st.session_state:
+    st.session_state["latest_answer"] = None
+
+
+def load_documents() -> list[dict[str, Any]]:
+    if "docs" not in st.session_state:
+        st.session_state["docs"] = get_docs()
+
+    return st.session_state["docs"]
+
+
+def load_query_logs() -> list[dict[str, Any]]:
+    if "logs" not in st.session_state:
+        st.session_state["logs"] = get_logs()
+
+    return st.session_state["logs"]
+
+
+def submit_question(question: str) -> bool:
     cleaned_question = question.strip()
 
     if not cleaned_question:
-        return
+        st.warning("Enter a question before asking the chatbot.")
+        return False
 
     try:
         result = ask_docs(cleaned_question)
@@ -155,27 +291,77 @@ def submit_question(question: str) -> None:
         st.session_state["chat"].append(answer_item)
         st.session_state.pop("logs", None)
 
+        return True
+
     except (requests.RequestException, RuntimeError) as exc:
         st.error(f"Could not get an answer: {exc}")
+        return False
+
+
+# ---------------------------------------------------------------------
+# UI helpers
+# ---------------------------------------------------------------------
+
+def render_feature_card(title: str, body: str) -> None:
+    st.markdown(
+        f"""
+        <div class="section-card">
+            <h3>{title}</h3>
+            <p>{body}</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_workflow_step(number: int, title: str, body: str) -> None:
+    st.markdown(
+        f"""
+        <div class="step-card">
+            <div>
+                <span class="step-number">{number}</span>
+                <strong>{title}</strong>
+            </div>
+            <div class="muted" style="margin-top: 0.45rem;">{body}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def show_sources(citations: list[dict[str, Any]]) -> None:
     if not citations:
+        st.caption("No citations returned for this answer.")
         return
 
-    st.markdown("#### Sources")
+    st.markdown("#### Grounding sources")
 
     for cite in citations:
         page = cite.get("page_number")
         page_text = f", page {page}" if page else ""
-        title = f"{cite.get('filename', 'Unknown source')}{page_text}"
+        filename = cite.get("filename", "Unknown source")
+        title = f"{filename}{page_text}"
 
         with st.expander(title):
             st.write(cite.get("snippet", "No snippet available."))
 
             score = cite.get("hybrid_score")
-            if score is not None:
+            if isinstance(score, (int, float)):
                 st.caption(f"Retrieval score: {score:.3f}")
+
+
+def render_latest_answer(answer_item: dict[str, Any]) -> None:
+    with st.container(border=True):
+        st.markdown("### Answer")
+        st.markdown(f"**Question:** {answer_item['question']}")
+
+        if answer_item["was_fallback"]:
+            st.warning(answer_item["answer"])
+        else:
+            st.success("Answer found in the knowledge base.")
+            st.write(answer_item["answer"])
+
+        show_sources(answer_item["citations"])
 
 
 def render_doc_rows(
@@ -184,187 +370,435 @@ def render_doc_rows(
     allow_delete: bool,
 ) -> None:
     if not docs:
-        st.info("No documents in this layer.")
+        st.info("No documents in this layer yet.")
         return
 
     for doc in docs:
-        info_col, action_col = st.columns([5, 2])
+        filename = doc.get("filename", "Untitled document")
+        status = doc.get("status", "unknown")
+        chunk_count = doc.get("chunk_count", 0)
+        page_count = doc.get("page_count")
+        document_id = doc["document_id"]
 
-        with info_col:
-            page_count = doc.get("page_count")
-            page_text = f" — {page_count} pages" if page_count else ""
+        with st.container(border=True):
+            info_col, action_col = st.columns([5, 2])
 
-            st.write(
-                f"**{doc['filename']}** — "
-                f"{doc['status']} — "
-                f"{doc['chunk_count']} chunks"
-                f"{page_text}"
-            )
+            with info_col:
+                st.markdown(f"**{filename}**")
+                st.caption("Indexed source available for retrieval and grounded answers.")
 
-        with action_col:
-            if st.button("Re-index", key=f"reindex-{doc['document_id']}"):
-                try:
-                    reindex_doc(doc["document_id"])
-                    st.session_state.pop("docs", None)
-                    st.success(f"Queued re-index for {doc['filename']}")
-                    st.rerun()
-                except (requests.RequestException, RuntimeError) as exc:
-                    st.error(f"Could not re-index document: {exc}")
+                metric_cols = st.columns(3)
 
-            if allow_delete:
-                if st.button("Delete", key=f"delete-{doc['document_id']}"):
+                with metric_cols[0]:
+                    st.metric("Status", status)
+
+                with metric_cols[1]:
+                    st.metric("Chunks", chunk_count)
+
+                with metric_cols[2]:
+                    st.metric("Pages", page_count if page_count else "—")
+
+            with action_col:
+                st.markdown("**Actions**")
+
+                if st.button(
+                    "Re-index",
+                    key=f"reindex-{document_id}",
+                    use_container_width=True,
+                ):
                     try:
-                        delete_doc(doc["document_id"])
+                        reindex_doc(document_id)
                         st.session_state.pop("docs", None)
-                        st.success(f"Deleted {doc['filename']}")
+                        st.success(f"Queued re-index for {filename}")
                         st.rerun()
                     except (requests.RequestException, RuntimeError) as exc:
-                        st.error(f"Could not delete document: {exc}")
-            else:
-                st.caption("Protected demo document")
+                        st.error(f"Could not re-index document: {exc}")
 
+                if allow_delete:
+                    if st.button(
+                        "Delete",
+                        key=f"delete-{document_id}",
+                        use_container_width=True,
+                    ):
+                        try:
+                            delete_doc(document_id)
+                            st.session_state.pop("docs", None)
+                            st.success(f"Deleted {filename}")
+                            st.rerun()
+                        except (requests.RequestException, RuntimeError) as exc:
+                            st.error(f"Could not delete document: {exc}")
+                else:
+                    st.caption("Protected demo document")
+
+
+# ---------------------------------------------------------------------
+# Header
+# ---------------------------------------------------------------------
+
+st.markdown(
+    """
+    <div class="top-header">
+        <h1>Business RAG Chatbot</h1>
+        <p>
+            Ask questions over business documents and get grounded answers with
+            citations. This demo shows document ingestion, retrieval, source
+            inspection, and chatbot UX for an AI-engineering portfolio project.
+        </p>
+        <div class="skill-row">
+            <span class="skill-chip">RAG</span>
+            <span class="skill-chip">Document parsing</span>
+            <span class="skill-chip">Embeddings</span>
+            <span class="skill-chip">Vector / hybrid search</span>
+            <span class="skill-chip">LLM orchestration</span>
+            <span class="skill-chip">Citations</span>
+            <span class="skill-chip">Streamlit UI</span>
+        </div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+st.info(
+    "Demo environment: this page is for testing only. "
+    "Do not upload confidential, personal, financial, legal, or sensitive business data."
+)
 
 if not API_KEY:
     st.error("Missing APP_API_KEY in .env")
     st.stop()
 
 
-if "chat" not in st.session_state:
-    st.session_state["chat"] = []
-
-if "latest_answer" not in st.session_state:
-    st.session_state["latest_answer"] = None
-
-
 # ---------------------------------------------------------------------
-# Chat
+# Chat — primary focus
 # ---------------------------------------------------------------------
 
-st.markdown("## Chat with the knowledge base")
+st.markdown("## Ask the document chatbot")
 
-st.caption(
-    "Ask a question here. The chatbot searches across both document layers: "
-    "the preloaded demo knowledge base and your temporary uploaded documents."
+st.markdown(
+    """
+    <div class="chat-focus">
+        <strong>Start here:</strong> ask a question about the indexed documents.
+        The chatbot retrieves relevant chunks and answers with citations when
+        supporting evidence is found.
+    </div>
+    """,
+    unsafe_allow_html=True,
 )
 
 with st.form("chat-form", clear_on_submit=True):
     question = st.text_input(
-        "Your question",
-        placeholder="Example: Which invoice is overdue?",
+        "Question",
+        placeholder="Example: Which customer orders are ready to ship?",
     )
-    submitted = st.form_submit_button("Ask the chatbot")
+
+    submitted = st.form_submit_button(
+        "Ask the chatbot",
+        type="primary",
+        use_container_width=True,
+    )
 
 if submitted:
     submit_question(question)
 
-if st.session_state["latest_answer"]:
-    latest = st.session_state["latest_answer"]
+answer_placeholder = st.empty()
 
-    st.markdown("### Chatbot answer")
-    st.markdown(f"**Question:** {latest['question']}")
+with st.expander("Try a demo question", expanded=False):
+    st.caption(
+        "These prompts are useful for testing retrieval, citations, fallback behavior, "
+        "and cross-document reasoning."
+    )
 
-    if latest["was_fallback"]:
-        st.warning(latest["answer"])
-    else:
-        st.success("Answer found in the knowledge base.")
-        st.write(latest["answer"])
-
-    show_sources(latest["citations"])
-
-
-st.markdown("### Suggested demo questions")
-st.caption(
-    "Use these to quickly test citations, fallback behavior, "
-    "and retrieval across different documents."
-)
-
-for index, sample_question in enumerate(SAMPLE_QUESTIONS, start=1):
-    question_col, button_col = st.columns([6, 1])
-
-    with question_col:
-        st.write(f"{index}. {sample_question}")
-
-    with button_col:
-        if st.button("Ask", key=f"sample-question-{index}"):
+    for index, sample_question in enumerate(SAMPLE_QUESTIONS, start=1):
+        if st.button(
+            sample_question,
+            key=f"sample-question-{index}",
+            use_container_width=True,
+        ):
             submit_question(sample_question)
-            st.rerun()
 
+with answer_placeholder.container():
+    if st.session_state["latest_answer"]:
+        render_latest_answer(st.session_state["latest_answer"])
 
 if len(st.session_state["chat"]) > 1:
-    st.markdown("### Previous conversation")
+    with st.expander("Previous conversation", expanded=False):
+        if st.button("Clear conversation"):
+            st.session_state["chat"] = []
+            st.session_state["latest_answer"] = None
+            st.rerun()
 
-    if st.button("Clear chat"):
-        st.session_state["chat"] = []
-        st.session_state["latest_answer"] = None
-        st.rerun()
+        for item in reversed(st.session_state["chat"][:-1]):
+            st.markdown(f"**Question:** {item['question']}")
 
-    for item in reversed(st.session_state["chat"][:-1]):
-        st.markdown(f"**Question:** {item['question']}")
+            if item["was_fallback"]:
+                st.warning(item["answer"])
+            else:
+                st.write(item["answer"])
 
-        if item["was_fallback"]:
-            st.warning(item["answer"])
-        else:
-            st.write(item["answer"])
+            show_sources(item["citations"])
+            st.divider()
 
-        show_sources(item["citations"])
-        st.divider()
+
+st.divider()
 
 
 # ---------------------------------------------------------------------
-# Document layers
+# Documents — visible below chat, no tabs
 # ---------------------------------------------------------------------
 
-st.markdown("## Document sources")
+st.markdown("## Documents available to the chatbot")
 
 st.caption(
-    "This environment has two document layers: "
-    "preloaded demo documents that are always available, "
-    "and temporary user-uploaded documents for local testing."
+    "The chatbot searches across two document layers: protected demo documents "
+    "and temporary uploaded documents for local testing."
 )
 
-if st.button("Refresh documents"):
-    st.session_state.pop("docs", None)
+upload_col, stats_col = st.columns([1.15, 1], gap="large")
+
+with upload_col:
+    with st.container(border=True):
+        st.markdown("### Upload a temporary test document")
+        st.caption(
+            "Supported formats: TXT, Markdown, and PDF. Uploaded documents can be "
+            "indexed, queried, re-indexed, and deleted."
+        )
+
+        uploaded_file = st.file_uploader(
+            "Choose a document",
+            type=["txt", "md", "pdf"],
+        )
+
+        if st.button(
+            "Upload and index document",
+            type="primary",
+            use_container_width=True,
+        ):
+            if uploaded_file is None:
+                st.warning("Choose a document before uploading.")
+            else:
+                try:
+                    upload_doc(uploaded_file)
+                    st.session_state.pop("docs", None)
+                    st.success("Temporary document uploaded successfully.")
+                    st.rerun()
+                except (requests.RequestException, RuntimeError) as exc:
+                    st.error(f"Could not upload document: {exc}")
+
+with stats_col:
+    with st.container(border=True):
+        st.markdown("### Document-analysis workflow")
+        st.markdown(
+            """
+            Uploaded documents become part of the RAG pipeline:
+
+            1. File ingestion  
+            2. Parsing and chunking  
+            3. Indexing for retrieval  
+            4. Question answering with citations  
+            5. Source inspection and logging  
+            """
+        )
+
+refresh_col, _ = st.columns([1, 4])
+
+with refresh_col:
+    if st.button("Refresh documents", use_container_width=True):
+        st.session_state.pop("docs", None)
+        st.rerun()
 
 try:
-    if "docs" not in st.session_state:
-        st.session_state["docs"] = get_docs()
-
-    docs = st.session_state["docs"]
+    docs = load_documents()
 
     demo_docs = [doc for doc in docs if doc.get("is_demo")]
     user_docs = [doc for doc in docs if not doc.get("is_demo")]
 
+    total_chunks = sum(doc.get("chunk_count", 0) for doc in docs)
+
+    metric_cols = st.columns(4)
+
+    with metric_cols[0]:
+        st.metric("Total documents", len(docs))
+
+    with metric_cols[1]:
+        st.metric("Demo documents", len(demo_docs))
+
+    with metric_cols[2]:
+        st.metric("User uploads", len(user_docs))
+
+    with metric_cols[3]:
+        st.metric("Indexed chunks", total_chunks)
+
     st.markdown("### Layer 1: Preloaded demo knowledge base")
     st.caption(
-        "These fictional demo documents are bundled with the app, "
-        "loaded automatically from the demo folder, and protected from deletion."
+        "These fictional documents are bundled with the app, loaded automatically, "
+        "and protected from deletion."
     )
     render_doc_rows(demo_docs, allow_delete=False)
 
-    st.markdown("### Layer 2: Temporary user uploads")
+    st.markdown("### Layer 2: Temporary uploaded documents")
     st.caption(
-        "These are documents uploaded during local testing. "
-        "They can be re-indexed or deleted."
+        "These documents are uploaded during testing and can be re-indexed or deleted."
     )
-
-    uploaded_file = st.file_uploader(
-        "Upload a temporary test document",
-        type=["txt", "md", "pdf"],
-    )
-
-    if uploaded_file and st.button("Upload temporary document"):
-        try:
-            upload_doc(uploaded_file)
-            st.session_state.pop("docs", None)
-            st.success("Temporary document uploaded successfully.")
-            st.rerun()
-        except (requests.RequestException, RuntimeError) as exc:
-            st.error(f"Could not upload document: {exc}")
-
     render_doc_rows(user_docs, allow_delete=True)
 
 except (requests.RequestException, RuntimeError) as exc:
     st.error(f"Could not load documents: {exc}")
+
+
+st.divider()
+
+
+# ---------------------------------------------------------------------
+# Project explanation below documents
+# ---------------------------------------------------------------------
+
+st.markdown("## Project details")
+
+overview_col, workflow_col = st.columns([1, 1.15], gap="large")
+
+with overview_col:
+    st.markdown("### What this project demonstrates")
+
+    card_cols_1 = st.columns(2)
+
+    with card_cols_1[0]:
+        render_feature_card(
+            "Production-style AI app",
+            "A Streamlit interface connected to a secured backend API.",
+        )
+
+    with card_cols_1[1]:
+        render_feature_card(
+            "Document QA workflow",
+            "Users can upload documents, index them, and ask natural-language questions.",
+        )
+
+    card_cols_2 = st.columns(2)
+
+    with card_cols_2[0]:
+        render_feature_card(
+            "Grounded answers",
+            "Responses include source snippets so users can inspect the evidence.",
+        )
+
+    with card_cols_2[1]:
+        render_feature_card(
+            "RAG observability",
+            "Logs expose fallback behavior, latency, citation counts, and retrieval scores.",
+        )
+
+with workflow_col:
+    st.markdown("### How the RAG chatbot works")
+
+    render_workflow_step(
+        1,
+        "Ingest documents",
+        "Demo files and temporary uploads are sent to the backend document pipeline.",
+    )
+
+    render_workflow_step(
+        2,
+        "Parse, chunk, and index",
+        "Documents are converted into searchable chunks that can be re-indexed when needed.",
+    )
+
+    render_workflow_step(
+        3,
+        "Retrieve relevant context",
+        "For each question, the app requests the most relevant document chunks.",
+    )
+
+    render_workflow_step(
+        4,
+        "Generate grounded answers",
+        "The chatbot answers using retrieved context and returns citations for verification.",
+    )
+
+    render_workflow_step(
+        5,
+        "Monitor quality",
+        "Query logs make retrieval quality, fallbacks, sources, and latency visible.",
+    )
+
+
+st.markdown("## Technical architecture")
+
+architecture_cols = st.columns(3)
+
+with architecture_cols[0]:
+    render_feature_card(
+        "Streamlit frontend",
+        "A clean interface for upload, chat, source review, and RAG observability.",
+    )
+
+with architecture_cols[1]:
+    render_feature_card(
+        "Backend API integration",
+        "The UI communicates with secured document and query endpoints using an API key.",
+    )
+
+with architecture_cols[2]:
+    render_feature_card(
+        "Document pipeline",
+        "Documents are uploaded, parsed, chunked, indexed, and made available for retrieval.",
+    )
+
+architecture_cols_2 = st.columns(3)
+
+with architecture_cols_2[0]:
+    render_feature_card(
+        "Retrieval layer",
+        "Questions are matched against indexed chunks and ranked by relevance.",
+    )
+
+with architecture_cols_2[1]:
+    render_feature_card(
+        "LLM orchestration",
+        "The backend returns grounded answers, fallback decisions, citations, and metadata.",
+    )
+
+with architecture_cols_2[2]:
+    render_feature_card(
+        "Quality monitoring",
+        "Query logs expose latency, fallback status, citation count, and retrieved sources.",
+    )
+
+
+skills_col, use_cases_col = st.columns([1, 1], gap="large")
+
+with skills_col:
+    st.markdown("### Skills demonstrated")
+    st.markdown(
+        """
+        - Retrieval-Augmented Generation
+        - Document parsing and ingestion
+        - Chunking and indexing workflows
+        - Embedding-based or hybrid retrieval concepts
+        - Source-grounded answer generation
+        - Prompt and fallback behavior design
+        - Streamlit app development
+        - Chatbot UI and product UX
+        - API integration and error handling
+        - RAG evaluation and observability
+        """
+    )
+
+with use_cases_col:
+    st.markdown("### Example use cases")
+    st.markdown(
+        """
+        - Internal policy assistant
+        - Sales enablement knowledge base
+        - Customer support document assistant
+        - Invoice, order, or operations lookup
+        - Employee onboarding chatbot
+        - Contract or FAQ exploration tool
+        - Lightweight analyst assistant for business documents
+        """
+    )
+
+
+st.divider()
 
 
 # ---------------------------------------------------------------------
@@ -373,25 +807,61 @@ except (requests.RequestException, RuntimeError) as exc:
 
 st.markdown("## Recent query logs")
 
-if st.button("Refresh logs"):
-    st.session_state.pop("logs", None)
+st.caption(
+    "Logs help evaluate answer quality, fallback behavior, retrieval sources, "
+    "citation coverage, and latency."
+)
+
+refresh_logs_col, logs_hint_col = st.columns([1, 4])
+
+with refresh_logs_col:
+    if st.button("Refresh logs", use_container_width=True):
+        st.session_state.pop("logs", None)
+        st.rerun()
+
+with logs_hint_col:
+    st.caption(
+        "Ask a few questions first, then refresh this section to inspect retrieval behavior."
+    )
 
 try:
-    if "logs" not in st.session_state:
-        st.session_state["logs"] = get_logs()
-
-    logs = st.session_state["logs"]
+    logs = load_query_logs()
 
     if not logs:
         st.info("No query logs yet.")
     else:
-        for log in logs:
-            status = "Fallback" if log["was_fallback"] else "Answered"
+        answered_count = sum(1 for log in logs if not log.get("was_fallback"))
+        fallback_count = sum(1 for log in logs if log.get("was_fallback"))
 
-            with st.expander(f"{status} — {log['question']}"):
-                st.write(f"**Answer:** {log['answer']}")
-                st.write(f"**Citations:** {log['citation_count']}")
-                st.write(f"**Latency:** {log['latency_ms']:.2f} ms")
+        log_metric_cols = st.columns(3)
+
+        with log_metric_cols[0]:
+            st.metric("Displayed logs", len(logs))
+
+        with log_metric_cols[1]:
+            st.metric("Answered", answered_count)
+
+        with log_metric_cols[2]:
+            st.metric("Fallbacks", fallback_count)
+
+        for log in logs:
+            was_fallback = log.get("was_fallback", False)
+            status = "Fallback" if was_fallback else "Answered"
+            question = log.get("question", "Untitled question")
+            answer = log.get("answer", "")
+            citation_count = log.get("citation_count", 0)
+            latency = log.get("latency_ms")
+
+            latency_text = (
+                f"{latency:.2f} ms"
+                if isinstance(latency, (int, float))
+                else "Not available"
+            )
+
+            with st.expander(f"{status} — {question}"):
+                st.write(f"**Answer:** {answer}")
+                st.write(f"**Citations:** {citation_count}")
+                st.write(f"**Latency:** {latency_text}")
 
                 sources = log.get("retrieved_sources", [])
 
@@ -404,13 +874,31 @@ try:
                         score = source.get("hybrid_score")
                         filename = source.get("filename", "Unknown source")
 
-                        if score is None:
-                            st.write(f"- {filename}{page_text}")
-                        else:
+                        if isinstance(score, (int, float)):
                             st.write(
                                 f"- {filename}{page_text} "
                                 f"(score: {score:.3f})"
                             )
+                        else:
+                            st.write(f"- {filename}{page_text}")
+                else:
+                    st.caption("No retrieved sources were logged for this query.")
 
 except (requests.RequestException, RuntimeError) as exc:
     st.error(f"Could not load query logs: {exc}")
+
+
+# ---------------------------------------------------------------------
+# Footer
+# ---------------------------------------------------------------------
+
+st.markdown(
+    """
+    <div class="footer">
+        <strong>Business RAG Chatbot</strong> — a Streamlit portfolio demo for
+        document ingestion, retrieval-augmented generation, grounded answers,
+        citations, and RAG observability.
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
