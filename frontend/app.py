@@ -82,12 +82,16 @@ CUSTOM_CSS = """
 
     .chat-focus {
         padding: 1.25rem;
-        border: 1px solid #dbeafe;
+        border: 1px solid #bfdbfe;
         border-radius: 1.1rem;
-        background: linear-gradient(180deg, #eff6ff 0%, #ffffff 70%);
+        background: #eff6ff;
+        color: #0f172a;
         margin-bottom: 1rem;
     }
-
+    
+    .chat-focus strong {
+        color: #0f172a;
+    }
     .section-card {
         padding: 1rem 1.1rem;
         border: 1px solid #e5e7eb;
