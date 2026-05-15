@@ -19,8 +19,8 @@ class DocumentIngestionJobResponse(BaseModel):
 
 
 class DocumentAskRequest(BaseModel):
-    document_id: str = Field(min_length=1)
     question: str = Field(min_length=1, max_length=1000)
+    document_id: str | None = Field(default=None, min_length=1)
     top_k: int = Field(default=3, ge=1, le=10)
 
 

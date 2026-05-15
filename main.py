@@ -4,6 +4,10 @@ from typing import Annotated
 import time
 from uuid import uuid4
 
+
+from dotenv import load_dotenv
+load_dotenv()
+
 from auth import require_api_key
 from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel, Field
@@ -601,11 +605,17 @@ async def ask_document_question(
     start_time = time.perf_counter()
 
     try:
-        response = await document_answering_service.answer(
-            document_id=request.document_id,
-            question=request.question,
-            top_k=request.top_k,
-        )
+        if request.document_id:
+            response = await document_answering_service.answer(
+                document_id=request.document_id,
+                question=request.question,
+                top_k=request.top_k,
+            )
+        else:
+            response = await document_answering_service.answer_all(
+                question=request.question,
+                top_k=request.top_k,
+            )
     except AppServiceError as ex:
         if str(ex) == "Document not found.":
             raise HTTPException(status_code=404, detail=str(ex)) from ex
@@ -615,11 +625,11 @@ async def ask_document_question(
     latency_ms = (time.perf_counter() - start_time) * 1000
 
     document_query_log_store.record_query(
-        document_id=request.document_id,
+        document_id=request.document_id or "all-documents",
         question=request.question,
         answer=response.answer,
-        citation_count=len(response.citations),
         was_fallback=response.was_fallback,
+        citation_count=len(response.citations),
         latency_ms=latency_ms,
         retrieved_sources=response.citations,
     )

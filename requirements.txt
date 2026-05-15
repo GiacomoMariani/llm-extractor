@@ -6,3 +6,6 @@ sentence-transformers
 pytest
 httpx
 pypdf
+streamlit
+requests
+python-dotenv

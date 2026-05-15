@@ -401,6 +401,51 @@ def test_ask_document_returns_grounded_answer_with_citations():
     assert 0.0 <= first_citation["keyword_score"] <= 1.0
     assert 0.0 <= first_citation["hybrid_score"] <= 1.0
 
+def test_ask_documents_without_document_id_searches_all_documents():
+    first_upload_response = client.post(
+        "/documents/upload",
+        headers=AUTH_HEADERS,
+        files={
+            "file": (
+                "backend-guide.txt",
+                b"FastAPI is the backend framework used in this project.",
+                "text/plain",
+            )
+        },
+    )
+
+    second_upload_response = client.post(
+        "/documents/upload",
+        headers=AUTH_HEADERS,
+        files={
+            "file": (
+                "testing-guide.txt",
+                b"Pytest is used for automated testing in this project.",
+                "text/plain",
+            )
+        },
+    )
+
+    assert first_upload_response.status_code == 200
+    assert second_upload_response.status_code == 200
+
+    response = client.post(
+        "/documents/ask",
+        headers=AUTH_HEADERS,
+        json={
+            "question": "What framework is used for the backend?",
+            "top_k": 2,
+        },
+    )
+
+    assert response.status_code == 200
+
+    payload = response.json()
+
+    assert "FastAPI" in payload["answer"]
+    assert payload["was_fallback"] is False
+    assert len(payload["citations"]) >= 1
+    assert payload["citations"][0]["filename"] == "backend-guide.txt"
 
 def test_ask_document_returns_404_for_unknown_document():
     response = client.post(
