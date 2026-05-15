@@ -1,25 +1,27 @@
-# LLM Extractor
+# Business RAG Knowledge-Base Chatbot
 
-A FastAPI backend for practical AI application patterns, centered on a business document RAG workflow.
+A local-first FastAPI and Streamlit application for asking grounded questions over business documents.
 
-The project supports structured extraction, classification, summarization, document upload, document ingestion, retrieval, grounded document Q&A with citations, explicit fallback behavior, query logging, knowledge-gap tracking, evaluation runs, usage tracking, and a simple tool-using assistant workflow.
+The project supports document upload, automatic demo-data seeding, text/Markdown/PDF ingestion, local embeddings, hybrid retrieval, grounded document Q&A with citations, explicit fallback behavior, query logging, knowledge-gap tracking, usage tracking, evaluation runs, and a practical Streamlit interface.
 
-This is a portfolio-oriented backend foundation for a Business RAG Knowledge-Base Chatbot. It is intentionally built with visible service boundaries rather than heavy framework magic, so the core AI engineering pieces are easy to inspect, test, and extend.
+It is built as a portfolio-oriented AI engineering project: the code favors clear service boundaries, testability, and inspectable RAG behavior over framework-heavy abstraction.
 
 ---
 
 ## Table of Contents
 
 - [What This Project Demonstrates](#what-this-project-demonstrates)
-- [Current Status](#current-status)
-- [Features](#features)
+- [Core Features](#core-features)
 - [Architecture Overview](#architecture-overview)
 - [Project Structure](#project-structure)
 - [Requirements](#requirements)
 - [Quick Start](#quick-start)
 - [Configuration](#configuration)
+- [Running the Streamlit UI](#running-the-streamlit-ui)
 - [Running with Docker](#running-with-docker)
 - [API Authentication](#api-authentication)
+- [Demo Data](#demo-data)
+- [Document Layers](#document-layers)
 - [API Reference](#api-reference)
 - [Document Q&A Workflow](#document-qa-workflow)
 - [Admin and Debug Workflow](#admin-and-debug-workflow)
@@ -37,10 +39,11 @@ This is a portfolio-oriented backend foundation for a Business RAG Knowledge-Bas
 
 ## What This Project Demonstrates
 
-`llm-extractor` demonstrates core backend patterns used in real AI applications:
+This project demonstrates practical backend and product patterns used in real AI applications:
 
 - FastAPI route design with Pydantic request and response models
-- API-key protected admin endpoints
+- Streamlit app for local demo and admin workflows
+- API-key protected document and admin endpoints
 - structured extraction from text
 - classification and summarization endpoints
 - local deterministic substitutes for model behavior during development
@@ -50,8 +53,11 @@ This is a portfolio-oriented backend foundation for a Business RAG Knowledge-Bas
 - local embedding generation with `sentence-transformers`
 - hybrid vector and keyword retrieval
 - grounded document answers with source citations
-- explicit fallback behavior when retrieved context does not support an answer
+- fallback behavior when retrieved context does not support an answer
 - background ingestion jobs
+- demo-data seeding
+- protected non-deletable demo documents
+- temporary user-uploaded documents
 - document listing, deletion, and re-indexing
 - admin query logs with retrieved-source debug data
 - knowledge-gap reporting from fallback questions
@@ -60,125 +66,77 @@ This is a portfolio-oriented backend foundation for a Business RAG Knowledge-Bas
 - SQLite-backed persistence
 - request logging, request IDs, health checks, and Docker packaging
 
-The current implementation is a strong backend slice. It is not yet a complete hosted web app.
-
 ---
 
-## Current Status
+## Core Features
 
-Implemented:
+### Streamlit UI
 
-- Backend API
-- API-key protection for admin and document Q&A routes
-- Text, Markdown, and PDF upload
-- Background document ingestion jobs
-- Document chunking and embedding
-- SQLite document/chunk storage
-- Page-aware PDF citations
-- Hybrid retrieval
-- Grounded document Q&A response
-- Explicit `was_fallback` response field
-- Document listing with metadata
-- Document deletion
-- Document re-indexing
-- Query logs with retrieved sources
-- Knowledge-gap endpoint for fallback questions
-- 10-case document Q&A evaluation set
-- Stored latest evaluation run
-- Usage and estimated cost tracking
-- Dockerfile for local containerized use
+The local Streamlit app provides:
 
-Not implemented yet:
-
-- Frontend chat UI
-- Admin dashboard UI
-- Production vector database
-- Postgres deployment
-- Object storage for original uploaded files
-- Real LLM provider answer synthesis
-- Live hosted deployment
-- Demo video
-
----
-
-## Features
-
-### Core Text Endpoints
-
-- `POST /extract` — extracts structured fields from support text.
-- `POST /classify` — classifies text into categories such as billing, technical, refund, or general.
-- `POST /summarize` — returns a short summary from input text.
-- `POST /answer` — answers a question from supplied context.
-- `POST /route` — routes user input to a likely task type.
-- `POST /chat` — returns a simple assistant reply.
+- a top-of-page chat form
+- clearly identified latest chatbot answer
+- expandable citation/source cards
+- suggested demo questions with `Ask` buttons
+- previous conversation history
+- safety notice for demo usage
+- document-source management split into two layers
+- upload panel for temporary documents
+- re-index controls
+- delete controls for temporary documents
+- protected demo documents with no delete button
+- recent query logs with retrieved sources and latency
 
 ### Document Q&A
 
-- Upload `.txt`, `.md`, and `.pdf` documents.
-- Create ingestion jobs and inspect job status.
-- Process ingestion in FastAPI background tasks.
-- Extract PDF text with page-aware citation metadata.
-- Chunk documents into retrieval passages.
-- Generate local embeddings with `sentence-transformers`.
-- Store documents, chunks, page metadata, and embeddings in SQLite.
-- Track document metadata:
-  - document ID
-  - filename
-  - file type
-  - upload date
-  - indexing status
-  - page count
-  - chunk count
-- Retrieve relevant chunks using hybrid vector and keyword scoring.
-- Return grounded answers with:
-  - answer text
-  - explicit fallback flag
-  - citation snippets
-  - filenames
-  - page numbers when available
-  - vector, keyword, and hybrid scores
-- Suppress answer citations when the system falls back because context does not support an answer.
+The document Q&A system can:
+
+- upload `.txt`, `.md`, and `.pdf` documents
+- seed fictional demo documents automatically
+- process documents into chunks
+- generate embeddings with `sentence-transformers/all-MiniLM-L6-v2`
+- store chunks and metadata in SQLite
+- retrieve relevant chunks using hybrid scoring
+- answer from retrieved context only
+- return fallback when context is missing or weak
+- cite filename, page number, snippet, and retrieval scores
+- ask across the full knowledge base when `document_id` is omitted
+- ask against one document when `document_id` is provided
 
 ### Admin and Debug
 
-- List uploaded documents.
-- Delete documents.
-- Re-index documents.
-- Inspect ingestion job status.
-- View document query logs.
-- Inspect retrieved chunks for each logged query.
-- Track fallback questions through a knowledge-gap endpoint.
-- Review latency, citation count, and fallback status for document Q&A calls.
+The admin/debug functionality includes:
 
-### Tool Assistant
+- list indexed documents
+- distinguish demo and temporary uploaded documents
+- delete temporary uploaded documents
+- block deletion of demo documents
+- re-index documents
+- inspect ingestion job status
+- view document query logs
+- inspect retrieved chunks for logged queries
+- track fallback questions as knowledge gaps
+- review latency, citation count, and fallback status
 
-- Looks up order status.
-- Checks refund eligibility.
-- Creates pending refund requests.
-- Requires confirmation before submitting a refund request.
-- Records tool calls in the response.
+### Other AI Application Patterns
 
-### Evaluation and Observability
+The repository also includes smaller endpoints for:
 
-- Document Q&A evaluation script.
-- 10-case document Q&A eval set.
-- Answerable and unanswerable/fallback eval cases.
-- Explicit fallback accuracy checks.
-- Citation count and citation text checks.
-- Retrieval score checks.
-- Stored latest document Q&A evaluation run.
-- Extraction evaluation script.
-- Usage records for document embedding and document answering.
-- Basic cost estimation.
-- Request logging middleware with `X-Request-ID` support.
-- Docker health check.
+- structured extraction
+- classification
+- summarization
+- context-only answer generation
+- request routing
+- a simple tool assistant for order/refund workflows
 
 ---
 
 ## Architecture Overview
 
 ```text
-HTTP routes
+Streamlit UI / API clients
+  ↓
+FastAPI routes
   ↓
 Pydantic request/response models
   ↓
@@ -186,12 +144,12 @@ Service layer
   ↓
 Providers, tools, stores, and clients
   ↓
-SQLite / local embeddings / external HTTP client where configured
+SQLite / local embeddings / local or HTTP tool clients
 ```
 
 ```mermaid
 flowchart TD
-    A[Client or API Docs] --> B[FastAPI Routes]
+    A[Streamlit UI or API Client] --> B[FastAPI Routes]
     B --> C[Pydantic Models]
     C --> D[Service Layer]
 
@@ -200,7 +158,9 @@ flowchart TD
     D --> G[Document Answering Service]
     D --> H[Evaluation Service]
     D --> I[Tool Assistant Service]
+    D --> S[Demo Document Seeder]
 
+    S --> E
     E --> J[Chunking]
     E --> K[Embedding Provider]
     E --> L[Document Store]
@@ -225,7 +185,7 @@ Key design choices:
    FastAPI route handlers validate input, call services, translate application errors into HTTP errors, and return response models.
 
 2. **Services contain application behavior.**  
-   Extraction, classification, summarization, answering, ingestion, retrieval, tool use, evaluation, and usage tracking are separated into service modules.
+   Extraction, classification, summarization, answering, ingestion, retrieval, tool use, evaluation, query logging, and usage tracking are separated into service modules.
 
 3. **Local components keep development testable.**  
    The current system uses deterministic or local implementations for many model-like behaviors. This keeps tests predictable and avoids requiring paid model APIs during development.
@@ -236,8 +196,8 @@ Key design choices:
 5. **Fallback is explicit.**  
    Fallback is represented as `was_fallback`, not inferred from citation count.
 
-6. **Admin visibility is backend-first.**  
-   Query logs and knowledge gaps are exposed through APIs. A frontend dashboard is still a future step.
+6. **Demo data is separated from temporary uploads.**  
+   Demo documents are loaded from `demo/`, marked with `is_demo=True`, and protected from deletion.
 
 ---
 
@@ -245,11 +205,14 @@ Key design choices:
 
 ```text
 .
-├── main.py                              # FastAPI app, route definitions, dependencies
+├── main.py                              # FastAPI app, route definitions, dependencies, lifespan seeding
 ├── auth.py                              # API key dependency
 ├── settings.py                          # Environment-based settings
-├── Dockerfile                           # Container image definition
+├── Dockerfile                           # Backend container image definition
 ├── requirements.txt                     # Python dependencies
+├── frontend/
+│   └── app.py                           # Streamlit local UI
+├── demo/                                # Safe fictional demo documents seeded on startup
 ├── models/                              # Pydantic request/response models
 ├── services/                            # Application services and persistence
 ├── providers/                           # Embedding/model provider abstractions
@@ -264,18 +227,20 @@ Important files:
 
 | File | Purpose |
 |---|---|
-| `main.py` | FastAPI app, middleware, dependencies, and HTTP routes. |
+| `main.py` | FastAPI app, middleware, dependencies, HTTP routes, and startup demo seeding. |
+| `frontend/app.py` | Streamlit UI for chat, document layers, upload, citations, and query logs. |
 | `auth.py` | Enforces `X-API-Key` authentication for protected endpoints. |
 | `models/document_qa.py` | Document upload, Q&A, citation, query-log, and knowledge-gap response models. |
 | `models/evaluation.py` | Document Q&A evaluation case and result models. |
+| `services/demo_document_seeder.py` | Loads files from `demo/` into the document store as protected demo documents. |
 | `services/pdf_parser.py` | Extracts readable text and page numbers from PDFs. |
-| `services/document_ingestion_service.py` | Chunks uploaded documents, embeds chunks, stores documents, and records usage. |
+| `services/document_ingestion_service.py` | Chunks documents, embeds chunks, stores documents, and records usage. |
 | `services/document_ingestion_worker.py` | Manages ingestion job status transitions. |
-| `services/ingestion_queue.py` | Defines the ingestion queue protocol and FastAPI background-task implementation. |
+| `services/ingestion_queue.py` | Defines ingestion queue protocol and FastAPI background-task implementation. |
 | `services/retrieval_service.py` | Performs hybrid vector and keyword retrieval. |
 | `services/document_answering_service.py` | Retrieves chunks, answers questions, and returns citations. |
 | `services/rule_based_answerer.py` | Local context-only answerer with fallback behavior. |
-| `services/sqlite_document_store.py` | Persists documents, chunks, embeddings, and document metadata. |
+| `services/sqlite_document_store.py` | Persists documents, chunks, embeddings, metadata, and demo flags. |
 | `services/document_query_log_store.py` | Persists document questions, answers, fallback status, and retrieved-source debug data. |
 | `services/evaluation_result_store.py` | Persists document Q&A evaluation summaries and case results. |
 | `services/usage_tracking_service.py` | Records estimated token usage and estimated cost. |
@@ -292,6 +257,9 @@ Important files:
 - python-multipart
 - pypdf
 - sentence-transformers
+- Streamlit
+- requests
+- python-dotenv
 - pytest
 - httpx
 
@@ -329,19 +297,30 @@ pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-### 4. Configure an API key
+### 4. Create local environment configuration
+
+Copy the example file:
 
 ```bash
-export APP_API_KEY="dev-secret-key"
+cp .env.example .env
 ```
 
 On Windows PowerShell:
 
 ```powershell
-$env:APP_API_KEY="dev-secret-key"
+Copy-Item .env.example .env
 ```
 
-### 5. Run the API
+At minimum, set:
+
+```env
+APP_API_KEY=dev-secret-key
+API_BASE_URL=http://localhost:8000
+```
+
+`APP_API_KEY` is used by the backend and Streamlit UI. `API_BASE_URL` tells Streamlit where the FastAPI backend is running.
+
+### 5. Run the backend
 
 ```bash
 uvicorn main:app --reload
@@ -373,6 +352,25 @@ Expected response:
 }
 ```
 
+### 6. Run the Streamlit UI in a second terminal
+
+```bash
+streamlit run frontend/app.py
+```
+
+Streamlit usually opens at:
+
+```text
+http://localhost:8501
+```
+
+Keep both processes running:
+
+```text
+Terminal 1: uvicorn main:app --reload
+Terminal 2: streamlit run frontend/app.py
+```
+
 ---
 
 ## Configuration
@@ -381,7 +379,8 @@ Environment variables:
 
 | Variable | Default | Purpose |
 |---|---:|---|
-| `APP_API_KEY` | none | Required for protected endpoints. Requests must send this value in `X-API-Key`. |
+| `APP_API_KEY` | none | Required for protected endpoints. Requests must send this value in `X-API-Key`. The Streamlit UI reads the same value from `.env`. |
+| `API_BASE_URL` | `http://localhost:8000` in Streamlit | Backend URL used by `frontend/app.py`. |
 | `APP_DB_PATH` | `app.db` | SQLite database path for documents, chunks, ingestion jobs, query logs, evaluations, and usage records. |
 | `APP_UPLOADED_TEXT_DB_PATH` | `uploaded_texts.db` | SQLite database path for staged uploaded text. |
 | `APP_UPLOADED_TEXT_CLEANUP_MAX_AGE_HOURS` | `24` | Maximum age for uploaded text cleanup. |
@@ -390,28 +389,60 @@ Environment variables:
 | `ORDER_API_BASE_URL` | none | Required when using an HTTP order client. |
 | `ORDER_API_KEY` | none | Optional bearer token for the external order API client. |
 
-Example local development configuration:
+Example `.env` for local development:
 
-```bash
-export APP_API_KEY="dev-secret-key"
-export APP_DB_PATH="app.db"
-export APP_UPLOADED_TEXT_DB_PATH="uploaded_texts.db"
-export EXTRACTOR_TYPE="rule"
-export ORDER_CLIENT_TYPE="local"
+```env
+APP_API_KEY=dev-secret-key
+API_BASE_URL=http://localhost:8000
+APP_DB_PATH=app.db
+APP_UPLOADED_TEXT_DB_PATH=uploaded_texts.db
+EXTRACTOR_TYPE=rule
+ORDER_CLIENT_TYPE=local
 ```
 
-Example external order API configuration:
+---
+
+## Running the Streamlit UI
+
+Run the backend first:
 
 ```bash
-export APP_API_KEY="dev-secret-key"
-export ORDER_CLIENT_TYPE="http_with_fallback"
-export ORDER_API_BASE_URL="https://orders.example.com"
-export ORDER_API_KEY="order-api-secret"
+uvicorn main:app --reload
+```
+
+Then run Streamlit:
+
+```bash
+streamlit run frontend/app.py
+```
+
+The Streamlit page includes:
+
+1. **Chat with the knowledge base**  
+   Ask questions across both document layers. The latest answer appears directly under the question box.
+
+2. **Suggested demo questions**  
+   Ten sample questions are available with nearby `Ask` buttons.
+
+3. **Document sources**  
+   Documents are split into two layers:
+   - Layer 1: preloaded demo knowledge base
+   - Layer 2: temporary user uploads
+
+4. **Recent query logs**  
+   Shows answer/fallback status, citation count, latency, and retrieved sources.
+
+The UI includes a demo safety notice:
+
+```text
+Demo environment: this page is for testing only. Do not upload confidential, personal, financial, legal, or sensitive business data.
 ```
 
 ---
 
 ## Running with Docker
+
+The Dockerfile currently runs the FastAPI backend.
 
 ### Build the image
 
@@ -419,7 +450,7 @@ export ORDER_API_KEY="order-api-secret"
 docker build -t llm-extractor .
 ```
 
-### Run the container
+### Run the backend container
 
 ```bash
 docker run --rm \
@@ -442,6 +473,7 @@ Notes:
 - The Dockerfile exposes port `8000`.
 - The container includes a health check against `/health`.
 - Mounting `/app/data` keeps SQLite files outside the disposable container filesystem.
+- Streamlit is intended for local development in the current setup. It can be containerized later if needed.
 
 ---
 
@@ -456,6 +488,74 @@ X-API-Key: dev-secret-key
 If `APP_API_KEY` is missing on the server, protected routes return `500` because the server is misconfigured.
 
 If the request omits or sends the wrong key, protected routes return `401`.
+
+---
+
+## Demo Data
+
+The `demo/` folder contains fictional, safe demo documents. They are designed to make the app usable immediately without uploading real business data.
+
+Current demo files include:
+
+```text
+demo/
+├── business_rag_chat_presentation.pdf
+├── demo_company_policy.txt
+├── demo_customer_support_faq.pdf
+├── demo_orders_invoices.txt
+├── demo_pricing_and_service_packages.txt
+└── demo_team_directory.txt
+```
+
+On backend startup, `DemoDocumentSeeder` reads this folder and ingests supported files.
+
+Supported seeded file types:
+
+- `.txt`
+- `.md`
+- `.pdf`
+
+Seeded demo documents are marked with:
+
+```json
+{
+  "is_demo": true
+}
+```
+
+Demo documents are protected from deletion. If a client tries to delete one, the API returns `403`.
+
+---
+
+## Document Layers
+
+The app intentionally separates documents into two layers.
+
+### Layer 1: Preloaded demo knowledge base
+
+These are fictional documents bundled with the project. They are loaded from the `demo/` folder on backend startup and are always available for testing.
+
+Properties:
+
+- seeded automatically
+- marked with `is_demo=true`
+- visible in the Streamlit document section
+- can be re-indexed
+- cannot be deleted
+
+### Layer 2: Temporary user uploads
+
+These are files uploaded during local testing from the Streamlit UI or API.
+
+Properties:
+
+- uploaded manually
+- marked with `is_demo=false`
+- visible separately from demo documents
+- can be re-indexed
+- can be deleted
+
+This split keeps the demo environment stable while still allowing upload/delete testing.
 
 ---
 
@@ -474,7 +574,7 @@ curl -X POST http://127.0.0.1:8000/extract \
   -H "Content-Type: application/json" \
   -H "X-API-Key: dev-secret-key" \
   -d '{
-    "text": "Customer Jane Doe reports a billing issue with order ORD-123."
+    "text": "Customer Jane Doe reports a billing question with order ORD-123."
   }'
 ```
 
@@ -484,7 +584,7 @@ curl -X POST http://127.0.0.1:8000/extract \
 curl -X POST http://127.0.0.1:8000/classify \
   -H "Content-Type: application/json" \
   -d '{
-    "text": "I was charged twice for my subscription."
+    "text": "I need help understanding my subscription invoice."
   }'
 ```
 
@@ -494,7 +594,7 @@ curl -X POST http://127.0.0.1:8000/classify \
 curl -X POST http://127.0.0.1:8000/summarize \
   -H "Content-Type: application/json" \
   -d '{
-    "text": "The customer contacted support about a duplicate charge and requested a refund."
+    "text": "The customer contacted support about a delivery question and requested a status update."
   }'
 ```
 
@@ -506,7 +606,7 @@ curl -X POST http://127.0.0.1:8000/answer \
   -H "X-API-Key: dev-secret-key" \
   -d '{
     "question": "What did the customer request?",
-    "context": "The customer contacted support about a duplicate charge and requested a refund."
+    "context": "The customer contacted support about a delivery question and requested a status update."
   }'
 ```
 
@@ -514,7 +614,7 @@ Response shape:
 
 ```json
 {
-  "answer": "The customer requested a refund.",
+  "answer": "The customer requested a status update.",
   "was_fallback": false
 }
 ```
@@ -555,6 +655,13 @@ curl http://127.0.0.1:8000/documents/jobs/job-abc123def456 \
   -H "X-API-Key: dev-secret-key"
 ```
 
+Possible statuses:
+
+- `queued`
+- `processing`
+- `completed`
+- `failed`
+
 Response shape:
 
 ```json
@@ -569,13 +676,6 @@ Response shape:
   "updated_at": "2026-05-05T08:00:02+00:00"
 }
 ```
-
-Possible statuses:
-
-- `queued`
-- `processing`
-- `completed`
-- `failed`
 
 ### List documents
 
@@ -596,13 +696,30 @@ Response shape:
       "upload_date": "2026-05-05T08:00:02+00:00",
       "status": "indexed",
       "page_count": 12,
-      "chunk_count": 8
+      "chunk_count": 8,
+      "is_demo": false
     }
   ]
 }
 ```
 
-### Ask a document question
+### Ask across all indexed documents
+
+Omit `document_id` to ask the full knowledge base.
+
+```bash
+curl -X POST http://127.0.0.1:8000/documents/ask \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: dev-secret-key" \
+  -d '{
+    "question": "Which customer orders are ready to ship?",
+    "top_k": 3
+  }'
+```
+
+### Ask a specific document
+
+Pass `document_id` to restrict retrieval to one document.
 
 ```bash
 curl -X POST http://127.0.0.1:8000/documents/ask \
@@ -619,13 +736,13 @@ Response shape:
 
 ```json
 {
-  "answer": "Employees receive 20 vacation days per year.",
+  "answer": "Employees may work remotely up to two days per week.",
   "citations": [
     {
       "chunk_id": "doc-abc123def456-chunk-2",
-      "filename": "company-handbook.pdf",
-      "page_number": 4,
-      "snippet": "Employees receive 20 vacation days per year.",
+      "filename": "demo_company_policy.txt",
+      "page_number": null,
+      "snippet": "Employees may work remotely up to two days per week.",
       "vector_score": 0.82,
       "keyword_score": 1.0,
       "hybrid_score": 0.91
@@ -663,7 +780,7 @@ Response shape:
 }
 ```
 
-### Delete a document
+### Delete a temporary document
 
 ```bash
 curl -X DELETE http://127.0.0.1:8000/documents/doc-abc123def456 \
@@ -679,6 +796,16 @@ Response shape:
 }
 ```
 
+Trying to delete a demo document returns:
+
+```json
+{
+  "detail": "Demo documents cannot be deleted."
+}
+```
+
+with HTTP status `403`.
+
 ### View document query logs
 
 ```bash
@@ -693,9 +820,9 @@ Response shape:
   "logs": [
     {
       "query_id": "query-abc123def456",
-      "document_id": "doc-abc123def456",
-      "question": "What is the vacation policy?",
-      "answer": "Employees receive 20 vacation days per year.",
+      "document_id": "all-documents",
+      "question": "Which package includes monthly reporting?",
+      "answer": "The Growth package includes monthly reporting.",
       "citation_count": 1,
       "latency_ms": 18.5,
       "was_fallback": false,
@@ -705,9 +832,9 @@ Response shape:
           "source_id": "source-abc123def456",
           "query_id": "query-abc123def456",
           "chunk_id": "doc-abc123def456-chunk-2",
-          "filename": "company-handbook.pdf",
-          "snippet": "Employees receive 20 vacation days per year.",
-          "page_number": 4,
+          "filename": "demo_pricing_and_service_packages.txt",
+          "snippet": "The Growth package includes monthly reporting.",
+          "page_number": null,
           "vector_score": 0.82,
           "keyword_score": 1.0,
           "hybrid_score": 0.91
@@ -720,29 +847,11 @@ Response shape:
 
 ### View knowledge gaps
 
-Knowledge gaps are fallback document questions. They help identify missing information in the uploaded documents.
+Knowledge gaps are fallback document questions. They help identify missing information in the indexed documents.
 
 ```bash
 curl "http://127.0.0.1:8000/admin/knowledge-gaps?limit=10" \
   -H "X-API-Key: dev-secret-key"
-```
-
-Response shape:
-
-```json
-{
-  "gaps": [
-    {
-      "query_id": "query-def456abc123",
-      "document_id": "doc-abc123def456",
-      "question": "What is the refund policy?",
-      "answer": "I could not find the answer in the provided context.",
-      "citation_count": 0,
-      "latency_ms": 14.2,
-      "created_at": "2026-05-05T08:10:00+00:00"
-    }
-  ]
-}
 ```
 
 ### Latest document Q&A evaluation run
@@ -752,48 +861,11 @@ curl http://127.0.0.1:8000/evals/document-qa/latest \
   -H "X-API-Key: dev-secret-key"
 ```
 
-Response shape:
-
-```json
-{
-  "run_id": "eval-abc123def456",
-  "total_cases": 10,
-  "passed": 10,
-  "failed": 0,
-  "average_latency_ms": 12.34,
-  "created_at": "2026-05-05T08:00:00+00:00",
-  "results": [
-    {
-      "name": "backend_framework_question",
-      "passed": true,
-      "answer": "FastAPI is the backend framework used in this project.",
-      "was_fallback": false,
-      "citation_count": 1,
-      "checks": [
-        "Answer contains 'FastAPI'."
-      ],
-      "failures": [],
-      "latency_ms": 10.0,
-      "document_id": "doc-abc123def456"
-    }
-  ]
-}
-```
-
 ### Usage summary
 
 ```bash
 curl http://127.0.0.1:8000/usage/summary \
   -H "X-API-Key: dev-secret-key"
-```
-
-Response shape:
-
-```json
-{
-  "total_estimated_cost_usd": 0.0,
-  "recent_record_count": 2
-}
 ```
 
 ### Recent usage records
@@ -807,32 +879,33 @@ curl "http://127.0.0.1:8000/usage/recent?limit=10" \
 
 ## Document Q&A Workflow
 
-Typical backend flow:
+Typical flow:
 
-1. Upload a `.txt`, `.md`, or `.pdf` file through `POST /documents/upload`.
-2. The API stores the uploaded text in a staging table.
-3. The API creates an ingestion job.
-4. A background task processes the document.
-5. The ingestion service chunks the document.
-6. The embedding provider generates one embedding per chunk.
-7. The document store persists:
+1. Backend starts.
+2. Demo documents from `demo/` are seeded if they are not already present.
+3. User uploads a temporary `.txt`, `.md`, or `.pdf` file through Streamlit or `POST /documents/upload`.
+4. The API stores uploaded text in a staging table.
+5. The API creates an ingestion job.
+6. A background task processes the document.
+7. The ingestion service chunks the document.
+8. The embedding provider generates one embedding per chunk.
+9. The document store persists:
    - document metadata
+   - demo flag
    - original extracted text
    - chunk text
    - chunk embeddings
    - page numbers when available
-8. The user asks a question through `POST /documents/ask`.
-9. The retrieval service retrieves top candidate chunks.
-10. The answerer returns either:
+10. The user asks a question through Streamlit or `POST /documents/ask`.
+11. The retrieval service retrieves top candidate chunks.
+12. The answerer returns either:
     - a grounded answer with citations, or
     - a fallback response if the context does not support an answer.
-11. The API logs the question, answer, latency, citation count, fallback status, and retrieved sources.
+13. The API logs the question, answer, latency, citation count, fallback status, and retrieved sources.
 
 ---
 
 ## Admin and Debug Workflow
-
-The backend exposes admin/debug data through API routes.
 
 Useful admin calls:
 
@@ -851,14 +924,15 @@ curl "http://127.0.0.1:8000/admin/knowledge-gaps?limit=20" \
   -H "X-API-Key: dev-secret-key"
 ```
 
-This supports a future admin dashboard with:
+The Streamlit page exposes the most important admin/debug data directly:
 
 - document library
-- ingestion status
+- demo vs temporary document split
 - document actions
 - query logs
-- retrieval debug view
-- fallback/knowledge-gap review
+- retrieved sources
+- latency
+- fallback status
 
 ---
 
@@ -955,7 +1029,7 @@ The document Q&A evaluation checks:
 
 The current document Q&A eval set includes 10 cases, with both answerable and unanswerable/fallback questions.
 
-It stores the latest evaluation run in SQLite so it can be inspected through:
+The latest evaluation run is stored in SQLite and can be inspected through:
 
 ```bash
 curl http://127.0.0.1:8000/evals/document-qa/latest \
@@ -1012,6 +1086,14 @@ pytest tests/api/test_document_routes.py
 ```
 
 ```bash
+pytest tests/api/test_usage_routes.py
+```
+
+```bash
+pytest tests/units/test_document_ingestion_service.py
+```
+
+```bash
 pytest tests/units/test_document_answering_service.py
 ```
 
@@ -1027,20 +1109,19 @@ pytest tests/units/test_document_store_metadata.py
 pytest tests/units/test_document_qa_evaluation_service.py
 ```
 
-```bash
-pytest tests/units/test_evaluation_result_store.py
-```
-
 The tests cover:
 
 - API routes
 - service behavior
 - document ingestion
+- demo document flags
+- protected demo deletion behavior
 - PDF parsing
 - ingestion queues
 - stored text ingestion
 - retrieval scoring
 - document answering
+- all-document Q&A
 - explicit fallback behavior
 - document query logs
 - knowledge gaps
@@ -1050,10 +1131,16 @@ The tests cover:
 - tool assistant behavior
 - order client fallback and retry behavior
 
-For local app testing, remember to configure:
+For local app testing, configure:
 
 ```bash
 export APP_API_KEY="dev-secret-key"
+```
+
+On Windows PowerShell:
+
+```powershell
+$env:APP_API_KEY="dev-secret-key"
 ```
 
 The test suite itself sets a test API key through fixtures.
@@ -1088,6 +1175,8 @@ Tables include data for:
 - evaluation case results
 - usage records
 
+Document rows include the `is_demo` flag so the application can distinguish seeded demo documents from temporary user uploads.
+
 Set `APP_DB_PATH` to control the main application database location:
 
 ```bash
@@ -1117,6 +1206,12 @@ Every request is logged with:
 - request ID
 
 If a request sends `X-Request-ID`, the app reuses it. Otherwise, the middleware creates a short request ID and returns it in the response header.
+
+### Demo seeding
+
+The FastAPI lifespan hook seeds supported documents from `demo/` on startup.
+
+The seeder skips files already present as demo documents by filename. This prevents duplicate demo documents during repeated local restarts.
 
 ### Background jobs
 
@@ -1153,43 +1248,6 @@ The HTTP client handles:
 
 ---
 
-## Known Limitations
-
-This project is intentionally practical but not fully production-ready.
-
-Current limitations:
-
-1. **No frontend yet.**  
-   The project currently exposes backend APIs only. A visitor-facing chat UI and admin dashboard are still future work.
-
-2. **The queue is not durable.**  
-   FastAPI background tasks are not a replacement for Redis, RQ, Celery, SQS, or another durable queue.
-
-3. **The main answerer is rule-based.**  
-   It selects relevant sentences from retrieved context. It does not yet call a real LLM for natural-language synthesis.
-
-4. **SQLite is local-first.**  
-   SQLite is excellent for learning and small deployments, but multi-instance production deployments usually require a managed database.
-
-5. **Embeddings are stored in SQLite.**  
-   This is acceptable for a small local MVP, but a production RAG system should use a dedicated vector database or Postgres with pgvector.
-
-6. **Original uploaded files are not stored in object storage.**  
-   The system stores extracted/staged text and document/chunk data. S3 or Supabase Storage would be better for production uploaded-file management.
-
-7. **Authentication is basic.**  
-   API-key auth is useful for development but does not provide user identity, roles, scopes, or tenant isolation.
-
-8. **Cost tracking is approximate.**  
-   Token counts are estimated by character length and default pricing is zero.
-
-9. **Monitoring is basic.**  
-   Logs and health checks exist, but metrics, traces, dashboards, and alerting are not yet implemented.
-
-10. **No deployed live app yet.**  
-    The app can run locally or in Docker, but there is no hosted production deployment included.
-
----
 
 ## Development Philosophy
 
@@ -1200,6 +1258,7 @@ Good AI application engineering is mostly careful software engineering around un
 - validate inputs
 - constrain outputs
 - isolate side effects
+- separate demo data from user data
 - track jobs
 - return citations
 - log retrieved context
@@ -1208,4 +1267,4 @@ Good AI application engineering is mostly careful software engineering around un
 - estimate cost
 - keep clear service boundaries
 
-That makes the codebase useful for practicing production AI engineering rather than just demonstrating a local prototype.
+That makes the codebase useful for practicing production AI engineering rather than only demonstrating a local prototype.
