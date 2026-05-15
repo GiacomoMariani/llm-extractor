@@ -3,10 +3,10 @@ import re
 from models.document_qa import DocumentUploadResponse
 from providers.embedding_provider import LocalEmbeddingProvider
 from services.chunking import chunk_text
-from services.document_store import InMemoryDocumentStore
+from services.document_store import InMemoryDocumentStore, StoredDocument
 from services.exceptions import AppServiceError
 from services.usage_tracking_service import SQLiteUsageTrackingService
-from services.document_store import StoredDocument
+
 
 class DocumentIngestionService:
     def __init__(
@@ -23,6 +23,7 @@ class DocumentIngestionService:
         self,
         filename: str,
         text: str,
+        is_demo: bool = False,
     ) -> DocumentUploadResponse:
         normalized_filename = filename.strip() or "uploaded.txt"
         normalized_text = text.strip()
@@ -35,7 +36,9 @@ class DocumentIngestionService:
         chunk_payloads = [
             {
                 "text": chunk_input["text"],
-                "embedding": self.embedding_provider.embed_document(chunk_input["text"]),
+                "embedding": self.embedding_provider.embed_document(
+                    chunk_input["text"]
+                ),
                 "page_number": chunk_input["page_number"],
             }
             for chunk_input in chunk_inputs
@@ -45,6 +48,7 @@ class DocumentIngestionService:
             filename=normalized_filename,
             text=normalized_text,
             chunk_payloads=chunk_payloads,
+            is_demo=is_demo,
         )
 
         if self.usage_tracking_service is not None:
@@ -73,12 +77,16 @@ class DocumentIngestionService:
         if stored_document is None:
             return None
 
-        chunk_inputs = self._chunk_text_with_page_numbers(stored_document.original_text)
+        chunk_inputs = self._chunk_text_with_page_numbers(
+            stored_document.original_text
+        )
 
         chunk_payloads = [
             {
                 "text": chunk_input["text"],
-                "embedding": self.embedding_provider.embed_document(chunk_input["text"]),
+                "embedding": self.embedding_provider.embed_document(
+                    chunk_input["text"]
+                ),
                 "page_number": chunk_input["page_number"],
             }
             for chunk_input in chunk_inputs

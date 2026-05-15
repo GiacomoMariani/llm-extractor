@@ -1,86 +1,62 @@
+from contextlib import asynccontextmanager
 import logging
 import re
-from typing import Annotated
 import time
+from typing import Annotated
 from uuid import uuid4
 
-
 from dotenv import load_dotenv
+
 load_dotenv()
 
 from auth import require_api_key
-from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, Query, Request, UploadFile
+from fastapi import (
+    BackgroundTasks,
+    Depends,
+    FastAPI,
+    File,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+)
 from pydantic import BaseModel, Field
 
-from models.health import HealthResponse
-from services.exceptions import AppServiceError, NotFoundError
-
-from models.routing import RouteRequest, RouteResponse
-from services.routing_service import RoutingService
-from services.rule_based_router import RuleBasedRouter
-
-from models.extraction import ExtractRequest, ExtractResponse
-from services.extractor import get_extractor
-from services.extraction_service import ExtractionService
-
-from models.classification import ClassifyRequest, ClassifyResponse
-from services.classification_service import ClassificationService
-from services.rule_based_classifier import RuleBasedClassifier
-
-from models.summarization import SummarizeRequest, SummarizeResponse
-from services.rule_based_summarizer import RuleBasedSummarizer
-from services.summarization_service import SummarizationService
-
 from models.answering import AnswerRequest, AnswerResponse
-from services.answering_service import AnsweringService
-from services.rule_based_answerer import RuleBasedAnswerer
-
+from models.chat import ChatRequest, ChatResponse
+from models.classification import ClassifyRequest, ClassifyResponse
 from models.document_qa import (
     DocumentAskRequest,
     DocumentAskResponse,
-    DocumentIngestionJobResponse,
-    DocumentUploadResponse,
-    DocumentListResponse,
-    DocumentSummaryResponse,
     DocumentDeleteResponse,
-    DocumentReindexResponse,
+    DocumentIngestionJobResponse,
+    DocumentListResponse,
     DocumentQueryLogListResponse,
     DocumentQueryLogResponse,
     DocumentQueryRetrievedSourceLogResponse,
+    DocumentReindexResponse,
+    DocumentSummaryResponse,
     KnowledgeGapListResponse,
     KnowledgeGapResponse,
 )
-
-from services.document_answering_service import DocumentAnsweringService
-from services.retrieval_service import RetrievalService
-from providers.embedding_provider import embedding_provider
-
-from models.chat import ChatRequest, ChatResponse
-from services.chat_service import ChatService
-from services.rule_based_chatbot import RuleBasedChatbot
-
-from services.sqlite_document_store import sqlite_document_store
-
-from services.document_ingestion_service import DocumentIngestionService
-from services.ingestion_job_store import SQLiteIngestionJobStore, sqlite_ingestion_job_store
-from services.document_ingestion_worker import DocumentIngestionWorker
-
-from models.tool_assistant import ToolAssistantRequest, ToolAssistantResponse
-from services.tool_assistant_service import ToolAssistantService
-
-from models.ingestion_queue_model import StoredTextUploadIngestionPayload, DocumentReindexIngestionPayload
-from services.uploaded_text_store import SQLiteUploadedTextStore, UploadedTextStore
-
 from models.evaluation import (
     DocumentQAEvalLatestRunResponse,
     DocumentQAEvalStoredCaseResultResponse,
 )
-
-from services.evaluation_result_store import (
-    SQLiteEvaluationResultStore,
-    sqlite_evaluation_result_store,
+from models.extraction import ExtractRequest, ExtractResponse
+from models.health import HealthResponse
+from models.ingestion_queue_model import (
+    DocumentReindexIngestionPayload,
+    StoredTextUploadIngestionPayload,
+    TextUploadIngestionPayload,
 )
-
+from models.maintenance import (
+    UploadedTextCleanupRequest,
+    UploadedTextCleanupResponse,
+)
+from models.routing import RouteRequest, RouteResponse
+from models.summarization import SummarizeRequest, SummarizeResponse
+from models.tool_assistant import ToolAssistantRequest, ToolAssistantResponse
 from models.usage import (
     UsageRecentRequest,
     UsageRecentResponse,
@@ -88,36 +64,79 @@ from models.usage import (
     UsageSummaryResponse,
 )
 
+from providers.embedding_provider import embedding_provider
+
+from services.answering_service import AnsweringService
+from services.chat_service import ChatService
+from services.classification_service import ClassificationService
+from services.demo_document_seeder import DemoDocumentSeeder
+from services.document_answering_service import DocumentAnsweringService
+from services.document_ingestion_service import DocumentIngestionService
+from services.document_ingestion_worker import DocumentIngestionWorker
+from services.document_query_log_store import (
+    SQLiteDocumentQueryLogStore,
+    sqlite_document_query_log_store,
+)
+from services.evaluation_result_store import (
+    SQLiteEvaluationResultStore,
+    sqlite_evaluation_result_store,
+)
+from services.exceptions import AppServiceError
+from services.extraction_service import ExtractionService
+from services.extractor import get_extractor
+from services.ingestion_job_store import SQLiteIngestionJobStore, sqlite_ingestion_job_store
+from services.ingestion_queue import (
+    DocumentIngestionQueue,
+    FastAPIBackgroundTasksIngestionQueue,
+)
+from services.pdf_parser import extract_pdf_pages
+from services.retrieval_service import RetrievalService
+from services.routing_service import RoutingService
+from services.rule_based_answerer import RuleBasedAnswerer
+from services.rule_based_chatbot import RuleBasedChatbot
+from services.rule_based_classifier import RuleBasedClassifier
+from services.rule_based_router import RuleBasedRouter
+from services.rule_based_summarizer import RuleBasedSummarizer
+from services.sqlite_document_store import sqlite_document_store
+from services.summarization_service import SummarizationService
+from services.tool_assistant_service import ToolAssistantService
+from services.uploaded_text_cleanup_service import delete_stale_uploaded_texts
+from services.uploaded_text_store import SQLiteUploadedTextStore, UploadedTextStore
 from services.usage_tracking_service import (
     SQLiteUsageTrackingService,
     sqlite_usage_tracking_service,
 )
 
-from services.ingestion_queue import (
-    DocumentIngestionQueue,
-    FastAPIBackgroundTasksIngestionQueue,
-)
-
-from models.ingestion_queue_model import TextUploadIngestionPayload
-
-from models.maintenance import (
-    UploadedTextCleanupRequest,
-    UploadedTextCleanupResponse,
-)
-from services.uploaded_text_cleanup_service import delete_stale_uploaded_texts
-
-from services.document_query_log_store import (
-    SQLiteDocumentQueryLogStore,
-    sqlite_document_query_log_store,
-)
-
-from services.pdf_parser import extract_pdf_pages
-
 from settings import get_settings
+
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
-app = FastAPI()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    ingestion_service = DocumentIngestionService(
+        store=sqlite_document_store,
+        embedding_provider=embedding_provider,
+        usage_tracking_service=sqlite_usage_tracking_service,
+    )
+
+    seeder = DemoDocumentSeeder(
+        demo_dir="demo",
+        ingestion_service=ingestion_service,
+    )
+
+    await seeder.seed()
+
+    yield
+
+
+app = FastAPI(
+    title="Business RAG Knowledge-Base Chatbot",
+    lifespan=lifespan,
+)
+
 
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
@@ -140,7 +159,6 @@ async def log_requests(request: Request, call_next):
         raise
 
     duration_ms = (time.perf_counter() - start_time) * 1000
-
     response.headers["X-Request-ID"] = request_id
 
     logger.info(
@@ -153,6 +171,7 @@ async def log_requests(request: Request, call_next):
     )
 
     return response
+
 
 class UserInput(BaseModel):
     name: str = Field(min_length=1)
@@ -171,6 +190,7 @@ class TextAnalysisResponse(BaseModel):
     unique_words: int
     preview: str
 
+
 def get_routing_service() -> RoutingService:
     router = RuleBasedRouter()
     return RoutingService(router)
@@ -178,8 +198,9 @@ def get_routing_service() -> RoutingService:
 
 RoutingServiceDependency = Annotated[
     RoutingService,
-    Depends(get_routing_service)
+    Depends(get_routing_service),
 ]
+
 
 def get_extraction_service() -> ExtractionService:
     extractor = get_extractor()
@@ -188,8 +209,9 @@ def get_extraction_service() -> ExtractionService:
 
 ExtractionServiceDependency = Annotated[
     ExtractionService,
-    Depends(get_extraction_service)
+    Depends(get_extraction_service),
 ]
+
 
 def get_classification_service() -> ClassificationService:
     classifier = RuleBasedClassifier()
@@ -198,8 +220,9 @@ def get_classification_service() -> ClassificationService:
 
 ClassificationServiceDependency = Annotated[
     ClassificationService,
-    Depends(get_classification_service)
+    Depends(get_classification_service),
 ]
+
 
 def get_summarization_service() -> SummarizationService:
     summarizer = RuleBasedSummarizer()
@@ -208,8 +231,9 @@ def get_summarization_service() -> SummarizationService:
 
 SummarizationServiceDependency = Annotated[
     SummarizationService,
-    Depends(get_summarization_service)
+    Depends(get_summarization_service),
 ]
+
 
 def get_answering_service() -> AnsweringService:
     answerer = RuleBasedAnswerer()
@@ -218,11 +242,13 @@ def get_answering_service() -> AnsweringService:
 
 AnsweringServiceDependency = Annotated[
     AnsweringService,
-    Depends(get_answering_service)
+    Depends(get_answering_service),
 ]
+
 
 def get_tool_assistant_service() -> ToolAssistantService:
     return ToolAssistantService()
+
 
 def get_document_ingestion_service() -> DocumentIngestionService:
     return DocumentIngestionService(
@@ -231,18 +257,22 @@ def get_document_ingestion_service() -> DocumentIngestionService:
         usage_tracking_service=sqlite_usage_tracking_service,
     )
 
+
 DocumentIngestionServiceDependency = Annotated[
     DocumentIngestionService,
     Depends(get_document_ingestion_service),
 ]
 
+
 def get_ingestion_job_store() -> SQLiteIngestionJobStore:
     return sqlite_ingestion_job_store
+
 
 IngestionJobStoreDependency = Annotated[
     SQLiteIngestionJobStore,
     Depends(get_ingestion_job_store),
 ]
+
 
 def get_evaluation_result_store() -> SQLiteEvaluationResultStore:
     return sqlite_evaluation_result_store
@@ -252,6 +282,7 @@ EvaluationResultStoreDependency = Annotated[
     SQLiteEvaluationResultStore,
     Depends(get_evaluation_result_store),
 ]
+
 
 def get_document_ingestion_worker(
     ingestion_service: DocumentIngestionServiceDependency,
@@ -268,6 +299,7 @@ DocumentIngestionWorkerDependency = Annotated[
     Depends(get_document_ingestion_worker),
 ]
 
+
 def get_document_answering_service() -> DocumentAnsweringService:
     return DocumentAnsweringService(
         store=sqlite_document_store,
@@ -276,10 +308,12 @@ def get_document_answering_service() -> DocumentAnsweringService:
         usage_tracking_service=sqlite_usage_tracking_service,
     )
 
+
 DocumentAnsweringServiceDependency = Annotated[
     DocumentAnsweringService,
     Depends(get_document_answering_service),
 ]
+
 
 def get_chat_service() -> ChatService:
     chatbot = RuleBasedChatbot()
@@ -291,6 +325,7 @@ ChatServiceDependency = Annotated[
     Depends(get_chat_service),
 ]
 
+
 def get_usage_tracking_service() -> SQLiteUsageTrackingService:
     return sqlite_usage_tracking_service
 
@@ -299,6 +334,7 @@ UsageTrackingServiceDependency = Annotated[
     SQLiteUsageTrackingService,
     Depends(get_usage_tracking_service),
 ]
+
 
 def get_document_ingestion_queue(
     background_tasks: BackgroundTasks,
@@ -311,6 +347,7 @@ DocumentIngestionQueueDependency = Annotated[
     Depends(get_document_ingestion_queue),
 ]
 
+
 def get_uploaded_text_store() -> UploadedTextStore:
     settings = get_settings()
     return SQLiteUploadedTextStore(settings.uploaded_text_db_path)
@@ -321,6 +358,7 @@ UploadedTextStoreDependency = Annotated[
     Depends(get_uploaded_text_store),
 ]
 
+
 def get_document_query_log_store() -> SQLiteDocumentQueryLogStore:
     return sqlite_document_query_log_store
 
@@ -329,6 +367,7 @@ DocumentQueryLogStoreDependency = Annotated[
     SQLiteDocumentQueryLogStore,
     Depends(get_document_query_log_store),
 ]
+
 
 @app.get("/health", response_model=HealthResponse)
 async def health_check() -> HealthResponse:
@@ -356,6 +395,7 @@ def analyze_text(request: TextRequest) -> TextAnalysisResponse:
         preview=text[:80],
     )
 
+
 @app.post("/route", response_model=RouteResponse)
 async def route_request(
     request: RouteRequest,
@@ -365,7 +405,8 @@ async def route_request(
         return await routing_service.route(request.user_input)
     except AppServiceError as ex:
         raise HTTPException(status_code=500, detail=str(ex)) from ex
-    
+
+
 @app.post(
     "/extract",
     response_model=ExtractResponse,
@@ -380,6 +421,7 @@ async def extract_fields(
     except AppServiceError as ex:
         raise HTTPException(status_code=500, detail=str(ex)) from ex
 
+
 @app.post("/classify", response_model=ClassifyResponse)
 async def classify_text(
     request: ClassifyRequest,
@@ -389,6 +431,7 @@ async def classify_text(
         return await classification_service.classify(request.text)
     except AppServiceError as ex:
         raise HTTPException(status_code=500, detail=str(ex)) from ex
+
 
 @app.post("/summarize", response_model=SummarizeResponse)
 async def summarize_text(
@@ -402,6 +445,7 @@ async def summarize_text(
         )
     except AppServiceError as ex:
         raise HTTPException(status_code=500, detail=str(ex)) from ex
+
 
 @app.post(
     "/answer",
@@ -433,7 +477,6 @@ async def upload_document(
     file: UploadFile = File(...),
 ) -> DocumentIngestionJobResponse:
     filename = file.filename or "uploaded.txt"
-
     raw_bytes = await file.read()
     lower_filename = filename.lower()
 
@@ -494,6 +537,7 @@ async def upload_document(
         updated_at=queued_job.updated_at,
     )
 
+
 @app.get(
     "/documents",
     response_model=DocumentListResponse,
@@ -512,10 +556,12 @@ async def list_documents() -> DocumentListResponse:
                 status=document.status,
                 page_count=document.page_count,
                 chunk_count=document.chunk_count,
+                is_demo=document.is_demo,
             )
             for document in documents
         ]
     )
+
 
 @app.post(
     "/documents/{document_id}/reindex",
@@ -547,24 +593,40 @@ async def reindex_document(
         status=job.status,
     )
 
+
 @app.delete(
     "/documents/{document_id}",
     response_model=DocumentDeleteResponse,
     dependencies=[Depends(require_api_key)],
 )
 async def delete_document(document_id: str) -> DocumentDeleteResponse:
+    document = sqlite_document_store.get_document(document_id)
+
+    if document is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Document not found.",
+        )
+
+    if document.is_demo:
+        raise HTTPException(
+            status_code=403,
+            detail="Demo documents cannot be deleted.",
+        )
+
     deleted = sqlite_document_store.delete_document(document_id)
 
     if not deleted:
         raise HTTPException(
-            status_code=404,
-            detail="Document not found.",
+            status_code=500,
+            detail="Document could not be deleted.",
         )
 
     return DocumentDeleteResponse(
         document_id=document_id,
         deleted=True,
     )
+
 
 @app.get(
     "/documents/jobs/{job_id}",
@@ -628,13 +690,14 @@ async def ask_document_question(
         document_id=request.document_id or "all-documents",
         question=request.question,
         answer=response.answer,
-        was_fallback=response.was_fallback,
         citation_count=len(response.citations),
+        was_fallback=response.was_fallback,
         latency_ms=latency_ms,
         retrieved_sources=response.citations,
     )
 
     return response
+
 
 @app.post(
     "/tool-assistant",
@@ -647,6 +710,7 @@ async def tool_assistant(
 ) -> ToolAssistantResponse:
     result = await service.answer(request.message)
     return ToolAssistantResponse(**result)
+
 
 @app.post(
     "/chat",
@@ -661,6 +725,7 @@ async def chat(
         return await chat_service.chat(request.message)
     except AppServiceError as ex:
         raise HTTPException(status_code=500, detail=str(ex)) from ex
+
 
 @app.get(
     "/evals/document-qa/latest",
@@ -702,6 +767,7 @@ async def get_latest_document_qa_eval(
             for result in case_results
         ],
     )
+
 
 @app.get(
     "/usage/summary",
@@ -747,6 +813,7 @@ async def get_recent_usage(
         ]
     )
 
+
 @app.post(
     "/admin/uploaded-texts/cleanup",
     response_model=UploadedTextCleanupResponse,
@@ -775,6 +842,7 @@ async def cleanup_uploaded_texts(
     )
 
     return UploadedTextCleanupResponse(deleted_count=deleted_count)
+
 
 @app.get(
     "/admin/document-query-logs",
@@ -816,6 +884,7 @@ async def list_document_query_logs(
             for log in logs
         ]
     )
+
 
 @app.get(
     "/admin/knowledge-gaps",

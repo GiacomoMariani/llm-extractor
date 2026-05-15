@@ -42,6 +42,7 @@ class DocumentSummaryResponse(BaseModel):
     status: str
     page_count: int | None = None
     chunk_count: int
+    is_demo: bool = False
 
 class DocumentListResponse(BaseModel):
     documents: list[DocumentSummaryResponse]

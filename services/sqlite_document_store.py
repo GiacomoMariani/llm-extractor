@@ -1,11 +1,12 @@
-import os
 import json
+import os
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
 from services.document_store import StoredChunk, StoredDocument, StoredDocumentSummary
+
 
 class SQLiteDocumentStore:
     def __init__(self, db_path: str = "app.db"):
@@ -27,7 +28,8 @@ class SQLiteDocumentStore:
                     file_type TEXT NOT NULL DEFAULT 'unknown',
                     upload_date TEXT NOT NULL DEFAULT '',
                     status TEXT NOT NULL DEFAULT 'indexed',
-                    page_count INTEGER
+                    page_count INTEGER,
+                    is_demo INTEGER NOT NULL DEFAULT 0
                 )
                 """
             )
@@ -51,10 +53,11 @@ class SQLiteDocumentStore:
             connection.commit()
 
     def save_document(
-            self,
-            filename: str,
-            text: str,
-            chunk_payloads: list[dict[str, object]],
+        self,
+        filename: str,
+        text: str,
+        chunk_payloads: list[dict[str, object]],
+        is_demo: bool = False,
     ) -> StoredDocument:
         document_id = f"doc-{uuid4().hex[:12]}"
         file_type = self._infer_file_type(filename)
@@ -75,8 +78,9 @@ class SQLiteDocumentStore:
                                        file_type,
                                        upload_date,
                                        status,
-                                       page_count)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                                       page_count,
+                                       is_demo)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     document_id,
@@ -86,6 +90,7 @@ class SQLiteDocumentStore:
                     upload_date,
                     status,
                     page_count,
+                    1 if is_demo else 0,
                 ),
             )
 
@@ -133,6 +138,7 @@ class SQLiteDocumentStore:
             status=status,
             page_count=page_count,
             chunks=chunks,
+            is_demo=is_demo,
         )
 
     def get_document(self, document_id: str) -> StoredDocument | None:
@@ -147,7 +153,8 @@ class SQLiteDocumentStore:
                        file_type,
                        upload_date,
                        status,
-                       page_count
+                       page_count,
+                       is_demo
                 FROM documents
                 WHERE document_id = ?
                 """,
@@ -188,6 +195,7 @@ class SQLiteDocumentStore:
             status=document_row[5] or "indexed",
             page_count=document_row[6],
             chunks=chunks,
+            is_demo=bool(document_row[7]),
         )
 
     def delete_document(self, document_id: str) -> bool:
@@ -195,11 +203,20 @@ class SQLiteDocumentStore:
             cursor = connection.cursor()
 
             cursor.execute(
-                "SELECT 1 FROM documents WHERE document_id = ?",
+                """
+                SELECT is_demo
+                FROM documents
+                WHERE document_id = ?
+                """,
                 (document_id,),
             )
 
-            if cursor.fetchone() is None:
+            row = cursor.fetchone()
+
+            if row is None:
+                return False
+
+            if bool(row[0]):
                 return False
 
             cursor.execute(
@@ -216,9 +233,9 @@ class SQLiteDocumentStore:
         return True
 
     def replace_document_chunks(
-            self,
-            document_id: str,
-            chunk_payloads: list[dict[str, object]],
+        self,
+        document_id: str,
+        chunk_payloads: list[dict[str, object]],
     ) -> StoredDocument | None:
         chunks: list[StoredChunk] = []
         page_count = self._infer_page_count(chunk_payloads)
@@ -232,7 +249,8 @@ class SQLiteDocumentStore:
                        original_text,
                        file_type,
                        upload_date,
-                       status
+                       status,
+                       is_demo
                 FROM documents
                 WHERE document_id = ?
                 """,
@@ -249,6 +267,7 @@ class SQLiteDocumentStore:
             file_type = document_row[2] or self._infer_file_type(filename)
             upload_date = document_row[3] or self._now()
             status = "indexed"
+            is_demo = bool(document_row[5])
 
             cursor.execute(
                 """
@@ -313,6 +332,7 @@ class SQLiteDocumentStore:
             status=status,
             page_count=page_count,
             chunks=chunks,
+            is_demo=is_demo,
         )
 
     def list_documents(self) -> list[StoredDocumentSummary]:
@@ -327,6 +347,7 @@ class SQLiteDocumentStore:
                        documents.upload_date,
                        documents.status,
                        documents.page_count,
+                       documents.is_demo,
                        COUNT(chunks.chunk_id) AS chunk_count
                 FROM documents
                          LEFT JOIN chunks
@@ -336,7 +357,8 @@ class SQLiteDocumentStore:
                          documents.file_type,
                          documents.upload_date,
                          documents.status,
-                         documents.page_count
+                         documents.page_count,
+                         documents.is_demo
                 ORDER BY documents.rowid
                 """
             )
@@ -352,6 +374,7 @@ class SQLiteDocumentStore:
                 status=status or "indexed",
                 page_count=page_count,
                 chunk_count=chunk_count,
+                is_demo=bool(is_demo),
             )
             for (
                 document_id,
@@ -360,6 +383,7 @@ class SQLiteDocumentStore:
                 upload_date,
                 status,
                 page_count,
+                is_demo,
                 chunk_count,
             ) in rows
         ]
@@ -409,6 +433,14 @@ class SQLiteDocumentStore:
                 """
             )
 
+        if "is_demo" not in existing_columns:
+            cursor.execute(
+                """
+                ALTER TABLE documents
+                    ADD COLUMN is_demo INTEGER NOT NULL DEFAULT 0
+                """
+            )
+
     def _ensure_chunk_columns(self, cursor: sqlite3.Cursor) -> None:
         existing_columns = self._get_columns(
             cursor=cursor,
@@ -419,9 +451,9 @@ class SQLiteDocumentStore:
             cursor.execute("ALTER TABLE chunks ADD COLUMN page_number INTEGER")
 
     def _get_columns(
-            self,
-            cursor: sqlite3.Cursor,
-            table_name: str,
+        self,
+        cursor: sqlite3.Cursor,
+        table_name: str,
     ) -> set[str]:
         cursor.execute(f"PRAGMA table_info({table_name})")
 
@@ -439,8 +471,8 @@ class SQLiteDocumentStore:
         return "unknown"
 
     def _infer_page_count(
-            self,
-            chunk_payloads: list[dict[str, object]],
+        self,
+        chunk_payloads: list[dict[str, object]],
     ) -> int | None:
         page_numbers = [
             int(chunk_payload["page_number"])
@@ -455,6 +487,7 @@ class SQLiteDocumentStore:
 
     def _now(self) -> str:
         return datetime.now(timezone.utc).isoformat()
+
 
 sqlite_document_store = SQLiteDocumentStore(
     db_path=os.getenv("APP_DB_PATH", "app.db")

@@ -21,6 +21,7 @@ class StoredDocumentSummary:
     status: str
     page_count: int | None
     chunk_count: int
+    is_demo: bool = False
 
 
 @dataclass(frozen=True)
@@ -33,6 +34,7 @@ class StoredDocument:
     status: str
     page_count: int | None
     chunks: list[StoredChunk] = field(default_factory=list)
+    is_demo: bool = False
 
 
 class InMemoryDocumentStore:
@@ -44,6 +46,7 @@ class InMemoryDocumentStore:
         filename: str,
         text: str,
         chunk_payloads: list[dict[str, object]],
+        is_demo: bool = False,
     ) -> StoredDocument:
         document_id = f"doc-{uuid4().hex[:12]}"
         page_count = self._infer_page_count(chunk_payloads)
@@ -67,6 +70,7 @@ class InMemoryDocumentStore:
             status="indexed",
             page_count=page_count,
             chunks=chunks,
+            is_demo=is_demo,
         )
 
         self._documents[document_id] = stored_document
@@ -85,12 +89,18 @@ class InMemoryDocumentStore:
                 status=document.status,
                 page_count=document.page_count,
                 chunk_count=len(document.chunks),
+                is_demo=document.is_demo,
             )
             for document in self._documents.values()
         ]
 
     def delete_document(self, document_id: str) -> bool:
-        if document_id not in self._documents:
+        document = self._documents.get(document_id)
+
+        if document is None:
+            return False
+
+        if document.is_demo:
             return False
 
         del self._documents[document_id]
@@ -125,6 +135,7 @@ class InMemoryDocumentStore:
             status="indexed",
             page_count=self._infer_page_count(chunk_payloads),
             chunks=chunks,
+            is_demo=stored_document.is_demo,
         )
 
         self._documents[document_id] = updated_document
