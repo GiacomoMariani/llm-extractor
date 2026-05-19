@@ -71,6 +71,7 @@ from services.chat_service import ChatService
 from services.classification_service import ClassificationService
 from services.demo_document_seeder import DemoDocumentSeeder
 from services.document_answering_service import DocumentAnsweringService
+from services.document_answerer_factory import get_document_answerer
 from services.document_ingestion_service import DocumentIngestionService
 from services.document_ingestion_worker import DocumentIngestionWorker
 from services.document_query_log_store import (
@@ -301,10 +302,12 @@ DocumentIngestionWorkerDependency = Annotated[
 
 
 def get_document_answering_service() -> DocumentAnsweringService:
+    settings = get_settings()
+
     return DocumentAnsweringService(
         store=sqlite_document_store,
         retrieval_service=RetrievalService(embedding_provider),
-        answerer=RuleBasedAnswerer(),
+        answerer=get_document_answerer(settings),
         usage_tracking_service=sqlite_usage_tracking_service,
     )
 

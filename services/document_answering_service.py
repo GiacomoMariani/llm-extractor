@@ -4,8 +4,13 @@ from models.document_qa import Citation, DocumentAskResponse
 from services.document_store import StoredDocument
 from services.exceptions import NotFoundError
 from services.retrieval_service import RetrievalService
+from services.document_answerer import (
+    DocumentAnswerer,
+    RuleBasedDocumentAnswerer,
+)
 from services.rule_based_answerer import RuleBasedAnswerer
 from services.usage_tracking_service import SQLiteUsageTrackingService
+from services.document_qa_prompt_builder import RetrievedContextBlock
 
 class DocumentStoreProtocol(Protocol):
     def get_document(self, document_id: str) -> StoredDocument | None:
@@ -19,12 +24,16 @@ class DocumentAnsweringService:
         self,
         store: DocumentStoreProtocol,
         retrieval_service: RetrievalService,
-        answerer: RuleBasedAnswerer,
+        answerer: DocumentAnswerer | RuleBasedAnswerer,
         usage_tracking_service: SQLiteUsageTrackingService | None = None,
     ):
         self.store = store
         self.retrieval_service = retrieval_service
-        self.answerer = answerer
+        self.answerer: DocumentAnswerer = (
+            RuleBasedDocumentAnswerer(answerer)
+            if isinstance(answerer, RuleBasedAnswerer)
+            else answerer
+        )
         self.usage_tracking_service = usage_tracking_service
 
     async def answer(
@@ -46,21 +55,35 @@ class DocumentAnsweringService:
             top_k=top_k,
         )
 
+        context_blocks = [
+            RetrievedContextBlock(
+                source_id=index + 1,
+                filename=stored_document.filename,
+                page_number=scored_chunk.chunk.page_number,
+                text=scored_chunk.chunk.text,
+            )
+            for index, scored_chunk in enumerate(scored_chunks)
+        ]
+
         combined_context = "\n".join(
-            scored_chunk.chunk.text
-            for scored_chunk in scored_chunks
+            block.text
+            for block in context_blocks
         )
 
         answer_response = await self.answerer.answer(
-            cleaned_question,
-            combined_context,
+            question=cleaned_question,
+            context_blocks=context_blocks,
         )
 
         if self.usage_tracking_service is not None:
             self.usage_tracking_service.record_usage(
                 operation="document_answer",
                 provider="local",
-                model_name=self.answerer.__class__.__name__,
+                model_name=getattr(
+                    self.answerer,
+                    "model_name",
+                    self.answerer.__class__.__name__,
+                ),
                 input_text=f"{cleaned_question}\n\n{combined_context}",
                 output_text=answer_response.answer,
                 metadata={
@@ -123,21 +146,38 @@ class DocumentAnsweringService:
             top_k=top_k,
         )
 
+        context_blocks = [
+            RetrievedContextBlock(
+                source_id=index + 1,
+                filename=filename_by_chunk_id.get(
+                    scored_chunk.chunk.chunk_id,
+                    "unknown",
+                ),
+                page_number=scored_chunk.chunk.page_number,
+                text=scored_chunk.chunk.text,
+            )
+            for index, scored_chunk in enumerate(scored_chunks)
+        ]
+
         combined_context = "\n".join(
-            scored_chunk.chunk.text
-            for scored_chunk in scored_chunks
+            block.text
+            for block in context_blocks
         )
 
         answer_response = await self.answerer.answer(
-            cleaned_question,
-            combined_context,
+            question=cleaned_question,
+            context_blocks=context_blocks,
         )
 
         if self.usage_tracking_service is not None:
             self.usage_tracking_service.record_usage(
                 operation="knowledge_base_answer",
                 provider="local",
-                model_name=self.answerer.__class__.__name__,
+                model_name=getattr(
+                    self.answerer,
+                    "model_name",
+                    self.answerer.__class__.__name__,
+                ),
                 input_text=f"{cleaned_question}\n\n{combined_context}",
                 output_text=answer_response.answer,
                 metadata={
