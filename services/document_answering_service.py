@@ -1,16 +1,21 @@
 from typing import Protocol
 
+from models.answering import AnswerResponse
 from models.document_qa import Citation, DocumentAskResponse
-from services.document_store import StoredDocument
-from services.exceptions import NotFoundError
-from services.retrieval_service import RetrievalService
 from services.document_answerer import (
     DocumentAnswerer,
     RuleBasedDocumentAnswerer,
 )
+from services.document_qa_prompt_builder import RetrievedContextBlock
+from services.document_store import StoredDocument
+from services.exceptions import NotFoundError
+from services.retrieval_service import RetrievalService
 from services.rule_based_answerer import RuleBasedAnswerer
 from services.usage_tracking_service import SQLiteUsageTrackingService
-from services.document_qa_prompt_builder import RetrievedContextBlock
+
+
+FALLBACK_ANSWER = "I could not find this information in the uploaded documents."
+
 
 class DocumentStoreProtocol(Protocol):
     def get_document(self, document_id: str) -> StoredDocument | None:
@@ -18,6 +23,7 @@ class DocumentStoreProtocol(Protocol):
 
     def list_documents(self):
         ...
+
 
 class DocumentAnsweringService:
     def __init__(
@@ -75,6 +81,31 @@ class DocumentAnsweringService:
             context_blocks=context_blocks,
         )
 
+        citations = [
+            Citation(
+                chunk_id=scored_chunk.chunk.chunk_id,
+                filename=stored_document.filename,
+                page_number=scored_chunk.chunk.page_number,
+                snippet=self._snippet(scored_chunk.chunk.text),
+                vector_score=scored_chunk.vector_score,
+                keyword_score=scored_chunk.keyword_score,
+                hybrid_score=scored_chunk.hybrid_score,
+            )
+            for scored_chunk in scored_chunks
+        ]
+
+        if _requires_fallback_due_to_missing_citations(
+            answer_response=answer_response,
+            citations=citations,
+        ):
+            answer_response = AnswerResponse(
+                answer=FALLBACK_ANSWER,
+                was_fallback=True,
+            )
+            citations = []
+
+        visible_citations = [] if answer_response.was_fallback else citations
+
         if self.usage_tracking_service is not None:
             self.usage_tracking_service.record_usage(
                 operation="document_answer",
@@ -91,22 +122,9 @@ class DocumentAnsweringService:
                 },
             )
 
-        citations = [
-            Citation(
-                chunk_id=scored_chunk.chunk.chunk_id,
-                filename=stored_document.filename,
-                page_number=scored_chunk.chunk.page_number,
-                snippet=self._snippet(scored_chunk.chunk.text),
-                vector_score=scored_chunk.vector_score,
-                keyword_score=scored_chunk.keyword_score,
-                hybrid_score=scored_chunk.hybrid_score,
-            )
-            for scored_chunk in scored_chunks
-        ]
-
         return DocumentAskResponse(
             answer=answer_response.answer,
-            citations=[] if answer_response.was_fallback else citations,
+            citations=visible_citations,
             was_fallback=answer_response.was_fallback,
         )
 
@@ -169,22 +187,6 @@ class DocumentAnsweringService:
             context_blocks=context_blocks,
         )
 
-        if self.usage_tracking_service is not None:
-            self.usage_tracking_service.record_usage(
-                operation="knowledge_base_answer",
-                provider="local",
-                model_name=getattr(
-                    self.answerer,
-                    "model_name",
-                    self.answerer.__class__.__name__,
-                ),
-                input_text=f"{cleaned_question}\n\n{combined_context}",
-                output_text=answer_response.answer,
-                metadata={
-                    "document_id": "all-documents",
-                },
-            )
-
         citations = [
             Citation(
                 chunk_id=scored_chunk.chunk.chunk_id,
@@ -201,12 +203,40 @@ class DocumentAnsweringService:
             for scored_chunk in scored_chunks
         ]
 
+        if _requires_fallback_due_to_missing_citations(
+            answer_response=answer_response,
+            citations=citations,
+        ):
+            answer_response = AnswerResponse(
+                answer=FALLBACK_ANSWER,
+                was_fallback=True,
+            )
+            citations = []
+
+        visible_citations = [] if answer_response.was_fallback else citations
+
+        if self.usage_tracking_service is not None:
+            self.usage_tracking_service.record_usage(
+                operation="knowledge_base_answer",
+                provider="local",
+                model_name=getattr(
+                    self.answerer,
+                    "model_name",
+                    self.answerer.__class__.__name__,
+                ),
+                input_text=f"{cleaned_question}\n\n{combined_context}",
+                output_text=answer_response.answer,
+                metadata={
+                    "document_id": "all-documents",
+                },
+            )
+
         return DocumentAskResponse(
             answer=answer_response.answer,
-            citations=[] if answer_response.was_fallback else citations,
+            citations=visible_citations,
             was_fallback=answer_response.was_fallback,
         )
-    
+
     def _snippet(self, text: str, limit: int = 160) -> str:
         cleaned = " ".join(text.split())
 
@@ -214,3 +244,13 @@ class DocumentAnsweringService:
             return cleaned
 
         return cleaned[:limit].rstrip() + "..."
+
+
+def _requires_fallback_due_to_missing_citations(
+    answer_response: AnswerResponse,
+    citations: list[Citation],
+) -> bool:
+    return (
+        not answer_response.was_fallback
+        and len(citations) == 0
+    )

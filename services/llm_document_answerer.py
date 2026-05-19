@@ -19,7 +19,7 @@ class LLMDocumentAnswerer:
             "model_name",
             model_client.__class__.__name__,
         )
-        
+
 
     async def answer(
         self,
@@ -46,9 +46,20 @@ class LLMDocumentAnswerer:
                 was_fallback=True,
             )
 
+        was_fallback = _looks_like_fallback(answer)
+
+        if not was_fallback and not _has_valid_source_citation(
+                answer=answer,
+                context_blocks=context_blocks,
+        ):
+            return AnswerResponse(
+                answer=FALLBACK_ANSWER,
+                was_fallback=True,
+            )
+
         return AnswerResponse(
             answer=answer,
-            was_fallback=_looks_like_fallback(answer),
+            was_fallback=was_fallback,
         )
 
 
@@ -64,3 +75,17 @@ def _looks_like_fallback(answer: str) -> bool:
     ]
 
     return any(marker in lowered for marker in fallback_markers)
+
+def _has_valid_source_citation(
+    answer: str,
+    context_blocks: list[RetrievedContextBlock],
+) -> bool:
+    valid_source_markers = {
+        f"[{block.source_id}]"
+        for block in context_blocks
+    }
+
+    return any(
+        marker in answer
+        for marker in valid_source_markers
+    )

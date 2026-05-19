@@ -20,9 +20,15 @@ def get_document_answerer(settings: Settings) -> DocumentAnswerer:
         return rule_answerer
 
     if settings.document_answerer_type == "llm":
-        llm_answerer = LLMDocumentAnswerer(
-            model_client=get_document_qa_model_client(settings),
-        )
+        try:
+            llm_answerer = LLMDocumentAnswerer(
+                model_client=get_document_qa_model_client(settings),
+            )
+        except ValueError:
+            if settings.document_qa_fallback_to_rule:
+                return rule_answerer
+
+            raise
 
         if settings.document_qa_fallback_to_rule:
             return FallbackDocumentAnswerer(

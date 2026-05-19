@@ -44,6 +44,37 @@ async def test_llm_document_answerer_returns_model_answer_from_context():
 
 
 @pytest.mark.asyncio
+async def test_llm_document_answerer_includes_multiple_context_blocks_in_prompt():
+    model_client = StubModelClient(
+        response="FastAPI is used for the backend. [2]"
+    )
+    answerer = LLMDocumentAnswerer(model_client=model_client)
+
+    result = await answerer.answer(
+        question="What backend framework is used?",
+        context_blocks=[
+            RetrievedContextBlock(
+                source_id=1,
+                filename="frontend.txt",
+                page_number=None,
+                text="The frontend uses Streamlit.",
+            ),
+            RetrievedContextBlock(
+                source_id=2,
+                filename="backend.txt",
+                page_number=None,
+                text="FastAPI is used for the backend.",
+            ),
+        ],
+    )
+
+    assert result.answer == "FastAPI is used for the backend. [2]"
+    assert result.was_fallback is False
+    assert "[1] frontend.txt, page unavailable" in model_client.prompts[0]
+    assert "[2] backend.txt, page unavailable" in model_client.prompts[0]
+
+
+@pytest.mark.asyncio
 async def test_llm_document_answerer_falls_back_without_context():
     model_client = StubModelClient(response="This should not be called.")
     answerer = LLMDocumentAnswerer(model_client=model_client)
@@ -77,7 +108,103 @@ async def test_llm_document_answerer_marks_model_fallback():
         ],
     )
 
+    assert result.answer == (
+        "I could not find this information in the uploaded documents."
+    )
     assert result.was_fallback is True
+
+
+@pytest.mark.asyncio
+async def test_llm_document_answerer_allows_model_fallback_without_citation():
+    model_client = StubModelClient(
+        response="I could not find this information in the uploaded documents."
+    )
+    answerer = LLMDocumentAnswerer(model_client=model_client)
+
+    result = await answerer.answer(
+        question="What is the refund policy?",
+        context_blocks=[
+            RetrievedContextBlock(
+                source_id=1,
+                filename="policy.pdf",
+                page_number=4,
+                text="The onboarding process starts after contract signature.",
+            )
+        ],
+    )
+
+    assert result.answer == (
+        "I could not find this information in the uploaded documents."
+    )
+    assert result.was_fallback is True
+
+
+@pytest.mark.asyncio
+async def test_llm_document_answerer_falls_back_when_answer_has_no_valid_source_citation():
+    model_client = StubModelClient(
+        response="Refunds are available within 30 days."
+    )
+    answerer = LLMDocumentAnswerer(model_client=model_client)
+
+    result = await answerer.answer(
+        question="What is the refund policy?",
+        context_blocks=[
+            RetrievedContextBlock(
+                source_id=1,
+                filename="policy.pdf",
+                page_number=4,
+                text="Refunds are available within 30 days.",
+            )
+        ],
+    )
+
+    assert result.answer == FALLBACK_ANSWER
+    assert result.was_fallback is True
+
+
+@pytest.mark.asyncio
+async def test_llm_document_answerer_falls_back_when_answer_cites_unknown_source():
+    model_client = StubModelClient(
+        response="Refunds are available within 30 days. [9]"
+    )
+    answerer = LLMDocumentAnswerer(model_client=model_client)
+
+    result = await answerer.answer(
+        question="What is the refund policy?",
+        context_blocks=[
+            RetrievedContextBlock(
+                source_id=1,
+                filename="policy.pdf",
+                page_number=4,
+                text="Refunds are available within 30 days.",
+            )
+        ],
+    )
+
+    assert result.answer == FALLBACK_ANSWER
+    assert result.was_fallback is True
+
+
+@pytest.mark.asyncio
+async def test_llm_document_answerer_falls_back_when_model_returns_blank_answer():
+    model_client = StubModelClient(response="   ")
+    answerer = LLMDocumentAnswerer(model_client=model_client)
+
+    result = await answerer.answer(
+        question="What is the refund policy?",
+        context_blocks=[
+            RetrievedContextBlock(
+                source_id=1,
+                filename="policy.pdf",
+                page_number=4,
+                text="Refunds are available within 30 days.",
+            )
+        ],
+    )
+
+    assert result.answer == FALLBACK_ANSWER
+    assert result.was_fallback is True
+
 
 def test_llm_document_answerer_uses_model_client_model_name():
     class NamedStubModelClient:
@@ -91,3 +218,15 @@ def test_llm_document_answerer_uses_model_client_model_name():
     )
 
     assert answerer.model_name == "test-model-client"
+
+
+def test_llm_document_answerer_uses_client_class_name_when_model_name_missing():
+    class UnnamedStubModelClient:
+        async def complete(self, prompt: str) -> str:
+            return "Answer from context. [1]"
+
+    answerer = LLMDocumentAnswerer(
+        model_client=UnnamedStubModelClient(),
+    )
+
+    assert answerer.model_name == "UnnamedStubModelClient"

@@ -38,6 +38,41 @@ def test_get_document_answerer_returns_llm_answerer_without_rule_fallback():
     assert answerer.model_name == "fake-document-qa"
 
 
+def test_get_document_answerer_falls_back_to_rule_when_openai_key_missing_and_fallback_enabled(
+    monkeypatch,
+):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    answerer = get_document_answerer(
+        Settings(
+            document_answerer_type="llm",
+            document_qa_model_client_type="openai",
+            document_qa_model_name="gpt-4.1-mini",
+            document_qa_fallback_to_rule=True,
+        )
+    )
+
+    assert isinstance(answerer, RuleBasedDocumentAnswerer)
+
+
+def test_get_document_answerer_raises_when_openai_key_missing_and_fallback_disabled(
+    monkeypatch,
+):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    with pytest.raises(ValueError) as exc_info:
+        get_document_answerer(
+            Settings(
+                document_answerer_type="llm",
+                document_qa_model_client_type="openai",
+                document_qa_model_name="gpt-4.1-mini",
+                document_qa_fallback_to_rule=False,
+            )
+        )
+
+    assert "OPENAI_API_KEY is required" in str(exc_info.value)
+
+
 def test_get_document_answerer_rejects_unsupported_answerer_type():
     with pytest.raises(ValueError) as exc_info:
         get_document_answerer(
@@ -49,3 +84,20 @@ def test_get_document_answerer_rejects_unsupported_answerer_type():
     assert "Unsupported DOCUMENT_ANSWERER_TYPE" in message
     assert "rule" in message
     assert "llm" in message
+
+def test_get_document_answerer_returns_openai_llm_with_rule_fallback_when_key_exists(
+    monkeypatch,
+):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    answerer = get_document_answerer(
+        Settings(
+            document_answerer_type="llm",
+            document_qa_model_client_type="openai",
+            document_qa_model_name="gpt-4.1-mini",
+            document_qa_fallback_to_rule=True,
+        )
+    )
+
+    assert isinstance(answerer, FallbackDocumentAnswerer)
+    assert answerer.model_name == "gpt-4.1-mini+fallback-rule"

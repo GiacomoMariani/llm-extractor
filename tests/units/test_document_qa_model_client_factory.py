@@ -16,7 +16,9 @@ def test_get_document_qa_model_client_returns_fake_client():
     assert isinstance(client, FakeDocumentQAModelClient)
 
 
-def test_get_document_qa_model_client_returns_openai_client():
+def test_get_document_qa_model_client_returns_openai_client(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
     client = get_document_qa_model_client(
         Settings(
             document_qa_model_client_type="openai",
@@ -26,6 +28,19 @@ def test_get_document_qa_model_client_returns_openai_client():
 
     assert isinstance(client, OpenAIDocumentQAModelClient)
     assert client.model_name == "gpt-4.1-mini"
+
+def test_get_document_qa_model_client_rejects_openai_without_api_key(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    with pytest.raises(ValueError) as exc_info:
+        get_document_qa_model_client(
+            Settings(
+                document_qa_model_client_type="openai",
+                document_qa_model_name="gpt-4.1-mini",
+            )
+        )
+
+    assert "OPENAI_API_KEY is required" in str(exc_info.value)
 
 
 def test_get_document_qa_model_client_rejects_unsupported_client_type():
