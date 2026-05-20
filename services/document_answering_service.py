@@ -1,3 +1,4 @@
+import re
 from typing import Protocol
 
 from models.answering import AnswerResponse
@@ -79,6 +80,10 @@ class DocumentAnsweringService:
         answer_response = await self.answerer.answer(
             question=cleaned_question,
             context_blocks=context_blocks,
+        )
+        answer_response = _polish_answer_response(
+            question=cleaned_question,
+            answer_response=answer_response,
         )
 
         citations = [
@@ -186,6 +191,10 @@ class DocumentAnsweringService:
             question=cleaned_question,
             context_blocks=context_blocks,
         )
+        answer_response = _polish_answer_response(
+            question=cleaned_question,
+            answer_response=answer_response,
+        )
 
         citations = [
             Citation(
@@ -244,6 +253,70 @@ class DocumentAnsweringService:
             return cleaned
 
         return cleaned[:limit].rstrip() + "..."
+
+
+def _polish_answer_response(
+    question: str,
+    answer_response: AnswerResponse,
+) -> AnswerResponse:
+    if answer_response.was_fallback:
+        return answer_response
+
+    polished_answer = _format_order_ledger_answer(
+        question=question,
+        answer=answer_response.answer,
+    )
+
+    if polished_answer is None:
+        return answer_response
+
+    return AnswerResponse(
+        answer=polished_answer,
+        was_fallback=False,
+    )
+
+
+def _format_order_ledger_answer(question: str, answer: str) -> str | None:
+    question_words = {
+        word
+        for word in re.findall(r"\b\w+\b", question.lower())
+        if len(word) > 2
+    }
+
+    if not {"packed", "awaiting", "carrier", "pickup"}.intersection(
+        question_words
+    ):
+        return None
+
+    row_match = re.search(
+        r"ORD-\d{4}-\d{4}\s*\|[^\n\r]+",
+        answer,
+    )
+
+    if row_match is None:
+        return None
+
+    parts = [part.strip() for part in row_match.group(0).split("|")]
+
+    if len(parts) < 10:
+        return None
+
+    order_id = parts[0]
+    customer = parts[2]
+    order_status = parts[4]
+    assigned_owner = parts[8]
+    notes = parts[9]
+
+    if (
+        order_status.lower() != "packed"
+        and "awaiting carrier pickup" not in notes.lower()
+    ):
+        return None
+
+    return (
+        f"{order_id} for {customer} is packed and awaiting carrier pickup. "
+        f"The assigned owner is {assigned_owner}."
+    )
 
 
 def _requires_fallback_due_to_missing_citations(

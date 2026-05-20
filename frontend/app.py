@@ -1,10 +1,10 @@
 import os
+from html import escape
 from typing import Any
 
 import requests
 import streamlit as st
 from dotenv import load_dotenv
-
 
 load_dotenv()
 
@@ -12,20 +12,20 @@ API_URL = os.getenv("API_BASE_URL", "http://localhost:8000").rstrip("/")
 API_KEY = os.getenv("APP_API_KEY", "")
 HEADERS = {"X-API-Key": API_KEY} if API_KEY else {}
 
-
 SAMPLE_QUESTIONS = [
-    "Which customer orders are ready to ship?",
-    "Who coordinates invoice and order follow-up?",
-    "Who reviews citation quality and fallback cases?",
+    "What are the standard support hours?",
+    "How long does standard demo order delivery take?",
+    "How long does refund review take?",
+    "Which orders are packed and awaiting carrier pickup?",
+    "How many delivered orders are marked as paid?",
+    "Who owns the order for Paper Trail Books?",
+    "Which package includes monthly reporting and knowledge-gap review?",
+    "Which package includes evaluation mode and retrieval debugging?",
     "How many remote work days are allowed each week?",
-    "Who approves expenses above 500 euros?",
-    "Which package includes monthly reporting?",
-    "Is custom integration included in the starter plan?",
-    "What support options are available for delivery questions?",
+    "Who approves expenses above EUR 500?",
+    "Who should review API sync or webhook issues?",
     "What are the main steps in the chatbot workflow?",
-    "Which information is not included in the demo documents?",
 ]
-
 
 # ---------------------------------------------------------------------
 # Page configuration
@@ -36,7 +36,6 @@ st.set_page_config(
     page_icon="💬",
     layout="wide",
 )
-
 
 CUSTOM_CSS = """
 <style>
@@ -88,7 +87,7 @@ CUSTOM_CSS = """
         color: #0f172a;
         margin-bottom: 1rem;
     }
-    
+
     .chat-focus strong {
         color: #0f172a;
     }
@@ -145,6 +144,23 @@ CUSTOM_CSS = """
         color: #64748b;
         font-size: 0.9rem;
     }
+
+    .sample-question-selected {
+        padding: 0.85rem 1rem;
+        border: 1px solid #22c55e;
+        border-radius: 0.55rem;
+        background: rgba(34, 197, 94, 0.14);
+        text-align: center;
+        font-weight: 700;
+        margin-bottom: 0.75rem;
+    }
+
+    .sample-question-selected small {
+        display: block;
+        color: #22c55e;
+        font-weight: 700;
+        margin-top: 0.25rem;
+    }
 </style>
 """
 
@@ -156,11 +172,11 @@ st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 # ---------------------------------------------------------------------
 
 def api_request(
-    method: str,
-    path: str,
-    *,
-    timeout: int = 15,
-    **kwargs: Any,
+        method: str,
+        path: str,
+        *,
+        timeout: int = 15,
+        **kwargs: Any,
 ) -> dict[str, Any]:
     if not API_KEY:
         raise RuntimeError("Missing APP_API_KEY in .env")
@@ -201,7 +217,7 @@ def ask_docs(question: str) -> dict[str, Any]:
         "/documents/ask",
         json={
             "question": question,
-            "top_k": 3,
+            "top_k": 5,
         },
         timeout=30,
     )
@@ -259,6 +275,15 @@ if "chat" not in st.session_state:
 if "latest_answer" not in st.session_state:
     st.session_state["latest_answer"] = None
 
+if "pending_question" not in st.session_state:
+    st.session_state["pending_question"] = None
+
+if "pending_sample_question" not in st.session_state:
+    st.session_state["pending_sample_question"] = None
+
+if "latest_error" not in st.session_state:
+    st.session_state["latest_error"] = None
+
 
 def load_documents() -> list[dict[str, Any]]:
     if "docs" not in st.session_state:
@@ -272,6 +297,21 @@ def load_query_logs() -> list[dict[str, Any]]:
         st.session_state["logs"] = get_logs()
 
     return st.session_state["logs"]
+
+
+def queue_question(question: str, *, sample_question: bool = False) -> None:
+    cleaned_question = question.strip()
+
+    if not cleaned_question:
+        st.warning("Enter a question before asking the chatbot.")
+        return
+
+    st.session_state["pending_question"] = cleaned_question
+    st.session_state["pending_sample_question"] = (
+        cleaned_question if sample_question else None
+    )
+    st.session_state["latest_error"] = None
+    st.rerun()
 
 
 def submit_question(question: str) -> bool:
@@ -292,19 +332,40 @@ def submit_question(question: str) -> bool:
         }
 
         st.session_state["latest_answer"] = answer_item
+        st.session_state["latest_error"] = None
         st.session_state["chat"].append(answer_item)
         st.session_state.pop("logs", None)
 
         return True
 
     except (requests.RequestException, RuntimeError) as exc:
-        st.error(f"Could not get an answer: {exc}")
+        st.session_state["latest_error"] = f"Could not get an answer: {exc}"
         return False
 
 
 # ---------------------------------------------------------------------
 # UI helpers
 # ---------------------------------------------------------------------
+
+
+def render_answer_mode_notice() -> None:
+    answerer_type = os.getenv("DOCUMENT_ANSWERER_TYPE", "rule").strip().lower()
+    model_client_type = os.getenv("DOCUMENT_QA_MODEL_CLIENT_TYPE", "fake").strip().lower()
+    model_name = os.getenv("DOCUMENT_QA_MODEL_NAME", "not configured").strip()
+
+    if answerer_type == "llm" and model_client_type == "openai":
+        st.info(f"OpenAI-backed answers are enabled using `{model_name}`.")
+    elif answerer_type == "llm":
+        st.info(
+            "LLM answers are enabled for local testing. "
+            "Contact the person who gave you this link to try the OpenAI-backed demo."
+        )
+    else:
+        st.info(
+            "OpenAI-backed answers are implemented but currently disabled. "
+            "Contact the person who gave you this link to try them."
+        )
+
 
 def render_feature_card(title: str, body: str) -> None:
     st.markdown(
@@ -369,9 +430,9 @@ def render_latest_answer(answer_item: dict[str, Any]) -> None:
 
 
 def render_doc_rows(
-    docs: list[dict[str, Any]],
-    *,
-    allow_delete: bool,
+        docs: list[dict[str, Any]],
+        *,
+        allow_delete: bool,
 ) -> None:
     if not docs:
         st.info("No documents in this layer yet.")
@@ -406,9 +467,9 @@ def render_doc_rows(
                 st.markdown("**Actions**")
 
                 if st.button(
-                    "Re-index",
-                    key=f"reindex-{document_id}",
-                    use_container_width=True,
+                        "Re-index",
+                        key=f"reindex-{document_id}",
+                        use_container_width=True,
                 ):
                     try:
                         reindex_doc(document_id)
@@ -420,9 +481,9 @@ def render_doc_rows(
 
                 if allow_delete:
                     if st.button(
-                        "Delete",
-                        key=f"delete-{document_id}",
-                        use_container_width=True,
+                            "Delete",
+                            key=f"delete-{document_id}",
+                            use_container_width=True,
                     ):
                         try:
                             delete_doc(document_id)
@@ -467,10 +528,11 @@ st.info(
     "Do not upload confidential, personal, financial, legal, or sensitive business data."
 )
 
+render_answer_mode_notice()
+
 if not API_KEY:
     st.error("Missing APP_API_KEY in .env")
     st.stop()
-
 
 # ---------------------------------------------------------------------
 # Chat — primary focus
@@ -489,39 +551,76 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+is_answering = st.session_state["pending_question"] is not None
+
 with st.form("chat-form", clear_on_submit=True):
     question = st.text_input(
         "Question",
-        placeholder="Example: Which customer orders are ready to ship?",
+        placeholder="Example: What are the standard support hours?",
+        disabled=is_answering,
     )
 
     submitted = st.form_submit_button(
         "Ask the chatbot",
         type="primary",
         use_container_width=True,
+        disabled=is_answering,
     )
 
 if submitted:
-    submit_question(question)
+    queue_question(question)
 
 answer_placeholder = st.empty()
 
-with st.expander("Try a demo question", expanded=False):
+with st.expander("Try a demo question", expanded=is_answering):
     st.caption(
         "These prompts are useful for testing retrieval, citations, fallback behavior, "
         "and cross-document reasoning."
     )
 
     for index, sample_question in enumerate(SAMPLE_QUESTIONS, start=1):
+        if sample_question == st.session_state["pending_sample_question"]:
+            st.markdown(
+                f"""
+                <div class="sample-question-selected">
+                    {escape(sample_question)}
+                    <small>Answering…</small>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            continue
+
         if st.button(
-            sample_question,
-            key=f"sample-question-{index}",
-            use_container_width=True,
+                sample_question,
+                key=f"sample-question-{index}",
+                use_container_width=True,
+                disabled=is_answering,
         ):
-            submit_question(sample_question)
+            queue_question(sample_question, sample_question=True)
 
 with answer_placeholder.container():
-    if st.session_state["latest_answer"]:
+    pending_question = st.session_state["pending_question"]
+
+    if pending_question:
+        with st.container(border=True):
+            st.markdown("### Answer")
+            st.markdown(f"**Question:** {pending_question}")
+            st.info("Retrieving sources and generating an answer…")
+
+            with st.spinner("Working on your answer..."):
+                submit_question(pending_question)
+
+        st.session_state["pending_question"] = None
+        st.session_state["pending_sample_question"] = None
+        st.rerun()
+
+    elif st.session_state["latest_error"]:
+        with st.container(border=True):
+            st.markdown("### Answer")
+            st.error(st.session_state["latest_error"])
+
+    elif st.session_state["latest_answer"]:
         render_latest_answer(st.session_state["latest_answer"])
 
 if len(st.session_state["chat"]) > 1:
@@ -542,9 +641,7 @@ if len(st.session_state["chat"]) > 1:
             show_sources(item["citations"])
             st.divider()
 
-
 st.divider()
-
 
 # ---------------------------------------------------------------------
 # Documents — visible below chat, no tabs
@@ -573,9 +670,9 @@ with upload_col:
         )
 
         if st.button(
-            "Upload and index document",
-            type="primary",
-            use_container_width=True,
+                "Upload and index document",
+                type="primary",
+                use_container_width=True,
         ):
             if uploaded_file is None:
                 st.warning("Choose a document before uploading.")
@@ -648,9 +745,7 @@ try:
 except (requests.RequestException, RuntimeError) as exc:
     st.error(f"Could not load documents: {exc}")
 
-
 st.divider()
-
 
 # ---------------------------------------------------------------------
 # Project explanation below documents
@@ -724,7 +819,6 @@ with workflow_col:
         "Query logs make retrieval quality, fallbacks, sources, and latency visible.",
     )
 
-
 st.markdown("## Technical architecture")
 
 architecture_cols = st.columns(3)
@@ -767,7 +861,6 @@ with architecture_cols_2[2]:
         "Query logs expose latency, fallback status, citation count, and retrieved sources.",
     )
 
-
 skills_col, use_cases_col = st.columns([1, 1], gap="large")
 
 with skills_col:
@@ -801,9 +894,7 @@ with use_cases_col:
         """
     )
 
-
 st.divider()
-
 
 # ---------------------------------------------------------------------
 # Admin query logs
@@ -890,7 +981,6 @@ try:
 
 except (requests.RequestException, RuntimeError) as exc:
     st.error(f"Could not load query logs: {exc}")
-
 
 # ---------------------------------------------------------------------
 # Footer

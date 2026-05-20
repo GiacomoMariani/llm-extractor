@@ -48,6 +48,25 @@ ORD-2026-1017 | INV-2026-5017 | Lantern Fox Media | 2026-05-03 | Delivered | Par
 ORD-2026-1018 | INV-2026-5018 | Alpine Mock Logistics | 2026-05-05 | Shipped | Open | 6,740.00 | 2026-06-04 | Marco Silva | Shipment includes ergonomic chairs; inspection photo saved in demo notes.
 ORD-2026-1019 | INV-2026-5019 | Green Window Foods | 2026-05-07 | Draft | Unbilled | 312.80 | Not issued | Nina Park | Draft order only; do not ship until customer confirms quantities.
 ORD-2026-1020 | INV-2026-5020 | Copper River Lab | 2026-05-08 | On Hold | Open | 2,050.00 | 2026-06-07 | Theo Brooks | Hold reason: customer requested tax-exempt review in this fictional dataset.
+ORD-2026-1021 | INV-2026-5021 | Morning Harbor Studio | 2026-05-09 | Packed | Open | 1,680.00 | 2026-06-08 | Mira Chen | Packed and awaiting carrier pickup; inspection note completed for the high-value carton.
+ORD-2026-1022 | INV-2026-5022 | Birchline Training Lab | 2026-05-10 | Packed | Open | 934.25 | 2026-06-09 | Priya Nair | Packed for bulk delivery; customer labels attached to each box.
+ORD-2026-1023 | INV-2026-5023 | Northfield Demo Works | 2026-05-11 | Packed | Open | 2,475.50 | 2026-06-10 | Ahmed Khan | Packed and awaiting carrier pickup; fragile-item sticker added to each carton.
+ORD-2026-1024 | INV-2026-5024 | Clearpath Office Group | 2026-05-12 | Packed | Open | 1,315.75 | 2026-06-11 | Elena Novak | Packed after carrier cutoff; scheduled to ship the next business day.
+
+PACKED ORDERS SUMMARY FOR DEMO RETRIEVAL
+
+Orders packed and awaiting carrier pickup:
+- ORD-2026-1007 for Verdant Loop Design is packed and awaiting carrier pickup. Assigned owner: Elena Novak.
+- ORD-2026-1021 for Morning Harbor Studio is packed and awaiting carrier pickup. Assigned owner: Mira Chen.
+- ORD-2026-1023 for Northfield Demo Works is packed and awaiting carrier pickup. Assigned owner: Ahmed Khan.
+
+All orders currently marked as packed:
+- ORD-2026-1007 for Verdant Loop Design is packed and awaiting carrier pickup. Assigned owner: Elena Novak.
+- ORD-2026-1016 for Pinecone Demo School is packed for bulk delivery. Assigned owner: Ahmed Khan.
+- ORD-2026-1021 for Morning Harbor Studio is packed and awaiting carrier pickup. Assigned owner: Mira Chen.
+- ORD-2026-1022 for Birchline Training Lab is packed for bulk delivery. Assigned owner: Priya Nair.
+- ORD-2026-1023 for Northfield Demo Works is packed and awaiting carrier pickup. Assigned owner: Ahmed Khan.
+- ORD-2026-1024 for Clearpath Office Group is packed after carrier cutoff and scheduled to ship the next business day. Assigned owner: Elena Novak.
 
 WAREHOUSE AND FULFILLMENT NOTES
 - Warehouse zone A stores paper, notebooks, desk organizers, and low-fragility consumables.
@@ -66,21 +85,6 @@ CUSTOMER SUPPORT PLAYBOOK FOR ORDER QUESTIONS
 - If a user asks for real payment instructions, fallback: this demo document contains fictional information only.
 - If a user asks about a missing order not listed here, say the order was not found in the uploaded documents.
 
-COMMON QUESTIONS ANSWERED BY THIS DOCUMENT
-Q: Which invoice is overdue?
-A: INV-2026-5005 for Silver Oak Training is overdue, with a due date of 2026-04-24.
-
-Q: Which orders are currently on hold?
-A: ORD-2026-1004, ORD-2026-1012, and ORD-2026-1020 are on hold. Their notes explain the review reason.
-
-Q: Which order is partially fulfilled?
-A: ORD-2026-1003 is partially fulfilled because desk chairs shipped while monitor arms are backordered.
-
-Q: Which order has a pending credit memo?
-A: ORD-2026-1008 has credit memo CM-2026-2201 pending review.
-
-Q: Who owns the order for Paper Trail Books?
-A: Theo Brooks owns ORD-2026-1010 for Paper Trail Books.
 
 DATA SAFETY STATEMENT
 This ledger is synthetic. It is designed for RAG search, citation testing, fallback testing, and UI demonstration. It should not be used for accounting, billing, collections, legal review, tax reporting, or operational decision-making.

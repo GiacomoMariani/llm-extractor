@@ -39,15 +39,3 @@ Employees should never share passwords, API keys, private tokens, or production 
 
 ## 12. Fallback behavior for policy questions
 If a user asks about a policy not described in this document, the chatbot should say the answer is not found in the uploaded company documents. It should not invent policy, legal, HR, or financial rules.
-
-## Example supported questions
-- How many remote work days are allowed each week?
-- Who approves expenses above EUR 500?
-- Can employees buy equipment directly?
-- When should support cases be escalated?
-- What kind of data should not be uploaded into demo tools?
-
-## Example fallback questions
-- What is the real legal contract clause for a customer?
-- What is an employee's private medical status?
-- What password should I use for production access?
