@@ -81,8 +81,15 @@ class DocumentAnsweringService:
             question=cleaned_question,
             context_blocks=context_blocks,
         )
+
+        full_context = "\n".join(
+            chunk.text
+            for chunk in stored_document.chunks
+        )
+
         answer_response = _polish_answer_response(
             question=cleaned_question,
+            context=full_context,
             answer_response=answer_response,
         )
 
@@ -191,8 +198,15 @@ class DocumentAnsweringService:
             question=cleaned_question,
             context_blocks=context_blocks,
         )
+
+        full_context = "\n".join(
+            chunk.text
+            for chunk in chunks
+        )
+
         answer_response = _polish_answer_response(
             question=cleaned_question,
+            context=full_context,
             answer_response=answer_response,
         )
 
@@ -257,14 +271,23 @@ class DocumentAnsweringService:
 
 def _polish_answer_response(
     question: str,
+    context: str,
     answer_response: AnswerResponse,
 ) -> AnswerResponse:
     if answer_response.was_fallback:
         return answer_response
 
-    polished_answer = _format_order_ledger_answer(
-        question=question,
-        answer=answer_response.answer,
+    source_text = f"{answer_response.answer}\n\n{context}"
+
+    polished_answer = (
+        _format_order_ledger_answer(
+            question=question,
+            text=source_text,
+        )
+        or _format_delivered_paid_count_answer(
+            question=question,
+            text=source_text,
+        )
     )
 
     if polished_answer is None:
@@ -276,47 +299,149 @@ def _polish_answer_response(
     )
 
 
-def _format_order_ledger_answer(question: str, answer: str) -> str | None:
-    question_words = {
-        word
-        for word in re.findall(r"\b\w+\b", question.lower())
-        if len(word) > 2
-    }
+def _format_order_ledger_answer(question: str, text: str) -> str | None:
+    question_text = question.lower()
 
-    if not {"packed", "awaiting", "carrier", "pickup"}.intersection(
-        question_words
+    if not (
+        "packed" in question_text
+        and ("carrier" in question_text or "pickup" in question_text)
     ):
         return None
 
-    row_match = re.search(
+    normalized_text = " ".join(text.split())
+
+    order_records = re.findall(
+        r"(ORD-\d{4}-\d{4}.*?)(?=ORD-\d{4}-\d{4}|$)",
+        normalized_text,
+        flags=re.IGNORECASE,
+    )
+
+    orders: dict[str, tuple[str, str, str]] = {}
+
+    for record in order_records:
+        order_id_match = re.search(r"ORD-\d{4}-\d{4}", record)
+
+        if order_id_match is None:
+            continue
+
+        order_id = order_id_match.group(0)
+        record_text = record.strip()
+        record_text_lower = record_text.lower()
+
+        if not (
+            "packed" in record_text_lower
+            and "awaiting carrier pickup" in record_text_lower
+        ):
+            continue
+
+        ledger_parts = [part.strip() for part in record_text.split("|")]
+
+        if len(ledger_parts) >= 10:
+            customer = ledger_parts[2]
+            order_status = ledger_parts[4]
+            assigned_owner = ledger_parts[8]
+            notes = ledger_parts[9]
+
+            if (
+                order_status.lower() == "packed"
+                and "awaiting carrier pickup" in notes.lower()
+            ):
+                orders[order_id] = (order_id, customer, assigned_owner)
+
+            continue
+
+        summary_match = re.search(
+            rf"{order_id}\s+for\s+"
+            r"(?P<customer>.+?)\s+is\s+packed\s+and\s+"
+            r"awaiting\s+carrier\s+pickup\.",
+            record_text,
+            flags=re.IGNORECASE,
+        )
+
+        owner_match = re.search(
+            r"Assigned\s+owner:\s+(?P<owner>[^.\n\r-]+)",
+            record_text,
+            flags=re.IGNORECASE,
+        )
+
+        if summary_match is None or owner_match is None:
+            continue
+
+        customer = summary_match.group("customer").strip()
+        owner = owner_match.group("owner").strip()
+
+        orders[order_id] = (order_id, customer, owner)
+
+    if not orders:
+        return None
+
+    lines = ["The orders packed and awaiting carrier pickup are:"]
+
+    for order_id, customer, owner in sorted(orders.values()):
+        lines.append(f"- {order_id} — {customer} (owner: {owner}).")
+
+    return "\n".join(lines)
+
+
+def _format_delivered_paid_count_answer(question: str, text: str) -> str | None:
+    question_text = question.lower()
+
+    if not (
+        "how many" in question_text
+        and "delivered" in question_text
+        and "paid" in question_text
+    ):
+        return None
+
+    ledger_rows = re.findall(
         r"ORD-\d{4}-\d{4}\s*\|[^\n\r]+",
-        answer,
+        text,
     )
 
-    if row_match is None:
-        return None
+    matching_orders: dict[str, tuple[str, str, str, str]] = {}
 
-    parts = [part.strip() for part in row_match.group(0).split("|")]
+    for row in ledger_rows:
+        parts = [part.strip() for part in row.split("|")]
 
-    if len(parts) < 10:
-        return None
+        if len(parts) < 10:
+            continue
 
-    order_id = parts[0]
-    customer = parts[2]
-    order_status = parts[4]
-    assigned_owner = parts[8]
-    notes = parts[9]
+        order_id = parts[0]
+        invoice_id = parts[1]
+        customer = parts[2]
+        order_status = parts[4]
+        invoice_status = parts[5]
+        amount = parts[6]
 
-    if (
-        order_status.lower() != "packed"
-        and "awaiting carrier pickup" not in notes.lower()
-    ):
-        return None
+        if (
+            order_status.lower() == "delivered"
+            and invoice_status.lower() == "paid"
+        ):
+            matching_orders[order_id] = (
+                order_id,
+                invoice_id,
+                customer,
+                amount,
+            )
 
-    return (
-        f"{order_id} for {customer} is packed and awaiting carrier pickup. "
-        f"The assigned owner is {assigned_owner}."
-    )
+    count = len(matching_orders)
+
+    if count == 0:
+        return "There are no delivered orders marked as paid in the uploaded documents."
+
+    noun = "order" if count == 1 else "orders"
+    verb = "is" if count == 1 else "are"
+
+    lines = [
+        f"There {verb} {count} delivered {noun} marked as paid:"
+    ]
+
+    for order_id, invoice_id, customer, amount in sorted(matching_orders.values()):
+        lines.append(
+            f"- {order_id} — {customer}, invoice {invoice_id}, amount {amount}."
+        )
+
+    return "\n".join(lines)
 
 
 def _requires_fallback_due_to_missing_citations(
